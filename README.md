@@ -1,4 +1,4 @@
-# pirate-ship
+# The Pirate Ship ☸🏴‍☠️
 Kubernetes penetration testing tool
 ```
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⠤⠴⠶⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
