@@ -1,0 +1,40 @@
+FROM python:3.9-slim-buster
+
+WORKDIR /app
+
+# Install dependencies with known vulnerabilities
+RUN pip install flask==2.0.1 requests==2.25.1 pyyaml==5.4.1 pymongo==3.11.0 werkzeug==2.0.0
+
+# Create a user but don't use it (intentionally run as root)
+RUN adduser --disabled-password --gecos '' appuser
+
+COPY . .
+
+# Create an insecure setup script with embedded flag
+RUN echo '#!/bin/bash\n\
+# This script configures the database\n\
+# FLAG{insecure_shell_script_flag}\n\
+echo "Setting up database connection..."\n\
+echo "mongodb://dbuser:dbpassword123@mongodb:27017/vulnapp" > /app/db_connection.txt\n\
+chmod 644 /app/db_connection.txt' > /app/setup.sh && \
+chmod +x /app/setup.sh
+
+# Hide a flag in the filesystem
+RUN mkdir -p /app/internal/config && \
+    echo "FLAG{sensitive_backend_config}" > /app/internal/config/secrets.txt && \
+    chmod 444 /app/internal/config/secrets.txt
+
+# Set environment variables with sensitive information
+ENV DB_USER="dbuser"
+ENV DB_PASSWORD="dbpassword123"
+ENV ADMIN_TOKEN="ey9876adminbackendtoken1234"
+ENV HIDDEN_FLAG="FLAG{environment_variables_exposure_backend}"
+ENV DEBUG=true
+
+EXPOSE 5000
+
+# Create an overly permissive permissions setup
+RUN chmod -R 777 /app
+
+# Use an entrypoint that runs with root privileges
+ENTRYPOINT ["python", "app.py"]

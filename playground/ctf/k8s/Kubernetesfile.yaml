@@ -1,0 +1,413 @@
+# namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vulnerable-app
+
+---
+# configmap.yaml - Using ConfigMap for sensitive data instead of Secrets (vulnerability)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-credentials
+  namespace: vulnerable-app
+data:
+  DB_USER: "admin"
+  DB_PASSWORD: "password123"  # Should be in a Secret, not a ConfigMap
+  MONGODB_CONNECTION: "mongodb://admin:password123@mongodb-service:27017/vulnapp"
+  API_SECRET: "api-key-9875-insecure-k8s-ctf-1234"
+  FLAG: "FLAG{sensitive_data_in_configmap}"
+
+---
+# secret.yaml - Base64 encoded but not properly safeguarded
+apiVersion: v1
+kind: Secret
+metadata:
+  name: application-secrets
+  namespace: vulnerable-app
+type: Opaque
+data:
+  admin-password: YWRtaW5fcGFzc3dvcmRfMTIzCg==
+  api-key: c2VjcmV0LWFwaS1rZXktZm9yLXZ1bG5lcmFibGUtYXBwCg==
+  flag: RkxBR3tzZWNyZXRzX2JhZGx5X21hbmFnZWR9Cg==
+
+---
+# vulnerable-serviceaccount.yaml - Overly permissive RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vulnerable-sa
+  namespace: vulnerable-app
+
+---
+# cluster-role.yaml - Overly permissive RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vulnerable-cluster-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/exec", "pods/log", "secrets", "configmaps", "namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# rolebinding.yaml - Binding the overly permissive role to the SA
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vulnerable-cluster-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: vulnerable-sa
+  namespace: vulnerable-app
+roleRef:
+  kind: ClusterRole
+  name: vulnerable-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# frontend-deployment.yaml - Insecure workload configuration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: vulnerable-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      serviceAccountName: vulnerable-sa  # Using overly permissive SA
+      containers:
+      - name: frontend
+        image: michonszy/k8s-ctf-frontend:v1  # Using vulnerable image
+        ports:
+        - containerPort: 3000
+        securityContext:
+          privileged: true  # Highly insecure
+          capabilities:
+            add: ["ALL"]  # Excessive capabilities
+          runAsUser: 0  # Running as root
+          readOnlyRootFilesystem: false  # Writable filesystem
+        env:
+        - name: BACKEND_URL
+          value: "http://backend-service:5000"
+        - name: API_KEY
+          valueFrom:
+            configMapKeyRef:  # Should be secretKeyRef
+              name: db-credentials
+              key: API_SECRET
+        volumeMounts:
+        - name: host-fs
+          mountPath: /host  # Dangerous host filesystem mount
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+      volumes:
+      - name: host-fs
+        hostPath:
+          path: /  # Mounting entire host filesystem (extremely dangerous)
+          type: Directory
+
+---
+# backend-deployment.yaml - Multiple security issues
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: vulnerable-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      serviceAccountName: vulnerable-sa  # Overly permissive SA
+      containers:
+      - name: backend
+        image: michonszy/k8s-ctf-backend:v1  # Vulnerable image from earlier
+        ports:
+        - containerPort: 5000
+        securityContext:
+          allowPrivilegeEscalation: true  # Allows privilege escalation
+          runAsUser: 0  # Running as root
+          readOnlyRootFilesystem: false  # Writable filesystem
+        env:
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: db-credentials
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            configMapKeyRef:  # Should use secretKeyRef
+              name: db-credentials
+              key: DB_PASSWORD
+        - name: DEBUG
+          value: "true"  # Exposing debug information
+        - name: FLAG
+          value: "FLAG{insecure_k8s_deployment}"
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
+
+---
+# mongodb-statefulset.yaml - Persistent storage with insecure defaults
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: vulnerable-app
+spec:
+  serviceName: "mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:4.4
+        ports:
+        - containerPort: 27017
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            configMapKeyRef:  # Should use secretKeyRef
+              name: db-credentials
+              key: DB_USER
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            configMapKeyRef:  # Should use secretKeyRef
+              name: db-credentials
+              key: DB_PASSWORD
+        volumeMounts:
+        - name: mongodb-data
+          mountPath: /data/db
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "300m"
+            memory: "256Mi"
+  volumeClaimTemplates:
+  - metadata:
+      name: mongodb-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+
+---
+# frontend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: vulnerable-app
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: LoadBalancer  # Exposing directly rather than through proper ingress
+
+---
+# backend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: vulnerable-app
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: ClusterIP
+
+---
+# mongodb-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-service
+  namespace: vulnerable-app
+spec:
+  selector:
+    app: mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+  type: ClusterIP
+
+---
+# admin-pod.yaml - Pod with excessive privileges that can be used as part of attack
+apiVersion: v1
+kind: Pod
+metadata:
+  name: admin-tools
+  namespace: vulnerable-app
+  labels:
+    app: admin-tools
+spec:
+  serviceAccountName: vulnerable-sa
+  containers:
+  - name: admin-tools
+    image: alpine:latest
+    command: ["sh", "-c", "echo 'FLAG{privileged_admin_pod}' > /root/flag.txt && sleep infinity"]
+    securityContext:
+      privileged: true
+      capabilities:
+        add: ["NET_ADMIN", "SYS_ADMIN"]
+    resources:
+      limits:
+        cpu: "100m"
+        memory: "128Mi"
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+
+---
+# vulnerable-network-policy.yaml (intentionally missing proper restrictions)
+# A properly configured network policy would be crucial but is missing here
+# No NetworkPolicy is defined, allowing all pods to communicate with each other
+# There should be a policy restricting access to backend from only the frontend
+
+---
+# dashboard-rbac.yaml - Exposing dashboard with admin privileges
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubernetes-dashboard
+  namespace: vulnerable-app
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubernetes-dashboard
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-dashboard
+  namespace: vulnerable-app
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin  # Giving dashboard admin privileges (very insecure)
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# dashboard-service.yaml - Exposing dashboard externally (bad practice)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard
+  namespace: vulnerable-app
+spec:
+  selector:
+    k8s-app: kubernetes-dashboard
+  ports:
+  - port: 443
+    targetPort: 8443
+  type: NodePort  # Exposing dashboard externally
+
+---
+# flag-configmap.yaml - Additional flags for the challenge
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: challenge-flags
+  namespace: vulnerable-app
+data:
+  flag1: "FLAG{insecure_workload_config}"
+  flag2: "FLAG{overly_permissive_rbac}"
+  flag3: "FLAG{supply_chain_vulnerability}"
+  flag4: "FLAG{missing_network_policy}"
+  flag5: "FLAG{inadequate_logging}"
+  flag6: "FLAG{broken_authentication}"
+  flag7: "FLAG{missing_security_context}"
+  flag8: "FLAG{secret_management_failures}"
+  flag9: "FLAG{misconfigured_dashboard}"
+  flag10: "FLAG{outdated_components}"
+
+---
+# Challenge Job that places a flag on nodes
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: node-flag-placement
+  namespace: vulnerable-app
+spec:
+  template:
+    spec:
+      serviceAccountName: vulnerable-sa
+      containers:
+      - name: flagplacer
+        image: alpine:latest
+        command:
+        - sh
+        - -c
+        - "echo 'FLAG{node_compromise_via_hostpath}' > /host/tmp/k8s-node-flag.txt && echo 'Job complete'"
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: hostpath
+          mountPath: /host
+      volumes:
+      - name: hostpath
+        hostPath:
+          path: /
+      restartPolicy: Never
+  backoffLimit: 1
+
+---
+# Outdated admission controller configuration (represented as a ConfigMap)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: admission-control-config
+  namespace: vulnerable-app
+data:
+  admission-config.yaml: |
+    # Intentionally missing crucial admission controllers like:
+    # - PodSecurityPolicy
+    # - LimitRanger
+    # - SecurityContextDeny
+    # Flag: FLAG{missing_admission_controls}

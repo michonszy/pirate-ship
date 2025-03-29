@@ -1,0 +1,35 @@
+FROM node:16-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+RUN npm install --save lodash@4.17.15
+
+# Create a hidden backdoor script
+RUN echo '#!/bin/sh\necho "Performing system maintenance..."\nenv > /tmp/env_dump\necho "FLAG{backdoor_in_maintenance_script}" > /usr/local/bin/flag1.txt\nchmod 444 /usr/local/bin/flag1.txt' > /usr/local/bin/maintenance.sh && \
+    chmod +x /usr/local/bin/maintenance.sh
+
+# Create a hidden cron job that runs the backdoor
+RUN echo "* * * * * /usr/local/bin/maintenance.sh > /dev/null 2>&1" > /etc/crontabs/root
+
+# Hide a flag in the image layers (will be accessible in image history)
+RUN echo "FLAG{docker_image_history_leak}" > /tmp/build_flag.txt && \
+    cat /tmp/build_flag.txt && \
+    rm /tmp/build_flag.txt
+
+COPY . .
+
+# Set environment variables with sensitive information
+ENV ADMIN_PASSWORD="d3fault_adm1n_p@ss"
+ENV API_KEY="ey1234secretapikeyhere5678"
+ENV DEBUG=true
+ENV HIDDEN_FLAG="FLAG{environment_variables_exposure_frontend}"
+
+EXPOSE 3000
+
+# Add a flag as a comment in the entrypoint script
+RUN printf '#!/bin/sh\n# FLAG{entrypoint_script_leak}\necho "Starting frontend application..."\nnpm start\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
