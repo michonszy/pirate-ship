@@ -4,6 +4,9 @@ import subprocess
 import re
 import yaml
 import sys
+import openai
+import json
+
 
 warnings.filterwarnings("ignore")
 
@@ -61,6 +64,7 @@ def get_kube_prompt():
 
 CLUSTER_IP = get_kube_prompt()
 HACK_NAME = "example_hack"
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class bcolors:
     HEADER = '\033[95m'
@@ -262,6 +266,94 @@ def status():
         print("  • Use: kubectl config use-context <context-name>\n")
         return True
 
+def auto_hack():
+    """Run reconnaissance and let GPT-driven AI decide next steps."""
+    print("🧠 Starting automated hacking process...")
+
+    # Step 1: Run reconnaissance
+    recon_file = os.path.join('rag/attack-trees', "recon.yaml")
+    if not os.path.isfile(recon_file):
+        print("❌ Reconnaissance tree (recon.yaml) not found.")
+        return True
+
+    with open(recon_file, "r") as f:
+        recon_tree = yaml.safe_load(f)
+    
+    outputs = []
+    variables = {}
+
+    def capture_output_from_tree(tree):
+        nonlocal variables, outputs
+        steps = {s["id"]: s for s in tree["steps"]}
+        start = tree.get("start", tree["steps"][0]["id"])
+
+        def run_step(sid):
+            step = steps.get(sid)
+            if not step: return
+            command = step.get("command")
+            if command:
+                print(f"🔍 Recon: {command}")
+                try:
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+                    out = result.stdout.strip()
+                    outputs.append({"command": command, "output": out})
+                    print(f"✅ {out}")
+                    for ex in step.get("extract", []):
+                        name = ex["name"]
+                        match = re.search(ex["regex"], out)
+                        if match:
+                            variables[name] = match.group(1)
+                except subprocess.CalledProcessError as e:
+                    outputs.append({"command": command, "output": e.stderr.strip()})
+                    print(f"❌ {e.stderr.strip()}")
+            if "next" in step:
+                run_step(step["next"])
+
+        run_step(start)
+
+    capture_output_from_tree(recon_tree)
+
+    # Step 2: Build GPT prompt
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are an offensive Kubernetes penetration testing assistant. "
+            "Based on previous reconnaissance, respond with ready-to-run kubectl/bash commands. "
+            "Do not explain. Only return actual commands to run."
+        )
+    }
+
+    history = [
+        {"role": "user", "content": json.dumps(outputs, indent=2)}
+    ]
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",  # Replace with your custom model if needed
+            messages=[system_msg] + history,
+            temperature=0.2
+        )
+        reply = response.choices[0].message["content"]
+        print("\n🤖 Suggested command(s):\n", reply)
+
+        # Step 3: Execute the commands
+        for line in reply.strip().splitlines():
+            if not line.strip(): continue
+            print(f"\n⚔️ Running: {line}")
+            try:
+                res = subprocess.run(line, shell=True, check=True, capture_output=True, text=True)
+                out = res.stdout.strip()
+                print(f"✅ Output:\n{out}")
+                # Optionally: feed this back for another GPT step
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed:\n{e.stderr.strip()}")
+
+    except Exception as e:
+        print(f"❌ OpenAI API error: {e}")
+    
+    return True
+
+
 def setup():
     """Setup tool"""
     print("Current setup")
@@ -290,7 +382,9 @@ COMMANDS = {
     "help": help,
     "setup": setup,
     "hack": lambda: hack(HACK_NAME),
-    "list": list_hacks
+    "list": list_hacks,
+    "auto": auto_hack
+
 }
 
 def handle_command(command):

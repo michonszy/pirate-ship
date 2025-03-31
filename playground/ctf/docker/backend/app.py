@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, request, jsonify
 import os
 import yaml
@@ -37,21 +36,29 @@ def login():
     password = data.get('password')
     
     if username in users_db and users_db[username] == password:
-        return jsonify({
+        token = base64.b64encode(f"{username}:{password}".encode()).decode()
+        response = {
             'success': True,
             'message': f'Welcome {username}',
-            'token': base64.b64encode(f"{username}:{password}".encode()).decode()
-        })
+            'token': token
+        }
+        if username == 'admin':
+            response['flag'] = 'FLAG{broken_authentication}'
+        return jsonify(response)
     return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
 @app.route('/api/users')
 def get_users():
-    # Insecure authorization check
     auth_header = request.headers.get('Authorization', '')
     if 'Bearer' in auth_header:
         token = auth_header.split(' ')[1]
-        if token == admin_token:
-            return jsonify(list(users_db.keys()))
+        try:
+            decoded = base64.b64decode(token).decode()
+            username, password = decoded.split(':')
+            if username in users_db and users_db[username] == password:
+                return jsonify(list(users_db.keys()))
+        except Exception:
+            pass
     return jsonify({'error': 'Unauthorized'}), 401
 
 @app.route('/api/config')
@@ -70,30 +77,36 @@ def get_config():
 
 @app.route('/api/flags')
 def get_flags():
-    # This should be protected but isn't
     auth_header = request.headers.get('Authorization', '')
     if 'Bearer' in auth_header:
-        return jsonify(flags_db)
+        token = auth_header.split(' ')[1]
+        try:
+            decoded = base64.b64decode(token).decode()
+            username, password = decoded.split(':')
+            if username in users_db and users_db[username] == password:
+                return jsonify(flags_db)
+        except Exception:
+            pass
     return jsonify({'error': 'Unauthorized'}), 401
 
 @app.route('/api/exec', methods=['POST'])
 def execute_command():
-    # Command injection vulnerability
     data = request.get_json()
     command = data.get('command')
     
     auth_header = request.headers.get('Authorization', '')
-    if 'Bearer' in auth_header and auth_header.split(' ')[1] == admin_token:
-        try:
-            output = subprocess.check_output(command, shell=True)
-            return jsonify({'output': output.decode()})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    if 'Bearer' in auth_header:
+        token = auth_header.split(' ')[1]
+        if token == admin_token:
+            try:
+                output = subprocess.check_output(command, shell=True)
+                return jsonify({'output': output.decode()})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
     return jsonify({'error': 'Unauthorized'}), 401
 
 @app.route('/api/parse', methods=['POST'])
 def parse_yaml():
-    # YAML parsing vulnerability (allows deserialization attacks)
     data = request.get_data().decode()
     try:
         result = yaml.load(data, Loader=yaml.Loader)  # Unsafe loader
@@ -103,7 +116,6 @@ def parse_yaml():
 
 @app.route('/internal/admin')
 def admin_panel():
-    # This should be internal only, but network policies are missing
     return jsonify({
         'message': 'Internal admin API',
         'flag': 'FLAG{missing_network_policy}',
@@ -111,5 +123,4 @@ def admin_panel():
     })
 
 if __name__ == '__main__':
-    # Running with debug=True in production is insecure
     app.run(host='0.0.0.0', port=5000, debug=debug_mode)

@@ -31,6 +31,8 @@ ENV ADMIN_TOKEN="ey9876adminbackendtoken1234"
 ENV HIDDEN_FLAG="FLAG{environment_variables_exposure_backend}"
 ENV DEBUG=true
 
+RUN echo "FLAG{outdated_components}" >> /opt/.flag
+
 EXPOSE 5000
 
 # Create an overly permissive permissions setup
