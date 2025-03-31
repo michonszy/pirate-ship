@@ -349,25 +349,6 @@ spec:
   type: NodePort  # Exposing dashboard externally
 
 ---
-# flag-configmap.yaml - Additional flags for the challenge
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: challenge-flags
-  namespace: vulnerable-app
-data:
-  flag1: "FLAG{insecure_workload_config}"
-  flag2: "FLAG{overly_permissive_rbac}"
-  flag3: "FLAG{supply_chain_vulnerability}"
-  flag4: "FLAG{missing_network_policy}"
-  flag5: "FLAG{inadequate_logging}"
-  flag6: "FLAG{broken_authentication}"
-  flag7: "FLAG{missing_security_context}"
-  flag8: "FLAG{secret_management_failures}"
-  flag9: "FLAG{misconfigured_dashboard}"
-  flag10: "FLAG{outdated_components}"
-
----
 # Challenge Job that places a flag on nodes
 apiVersion: batch/v1
 kind: Job

