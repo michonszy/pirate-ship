@@ -38,6 +38,9 @@ kind: ServiceAccount
 metadata:
   name: vulnerable-sa
   namespace: vulnerable-app
+  annotations:
+    ctf.flag/overly_permissive_rbac: "FLAG{overly_permissive_rbac}"
+
 
 ---
 # cluster-role.yaml - Overly permissive RBAC
@@ -255,6 +258,8 @@ kind: Service
 metadata:
   name: backend-service
   namespace: vulnerable-app
+  annotations:
+    ctf.flag: "FLAG{missing_network_policy}"
 spec:
   selector:
     app: backend
@@ -262,6 +267,7 @@ spec:
   - port: 5000
     targetPort: 5000
   type: ClusterIP
+
 
 ---
 # mongodb-service.yaml
@@ -312,6 +318,41 @@ spec:
 # There should be a policy restricting access to backend from only the frontend
 
 ---
+# dashboard-deployment.yaml - The actual dashboard pod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-dashboard
+  namespace: vulnerable-app
+  labels:
+    k8s-app: kubernetes-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kubernetes-dashboard
+  template:
+    metadata:
+      labels:
+        k8s-app: kubernetes-dashboard
+    spec:
+      serviceAccountName: kubernetes-dashboard
+      containers:
+      - name: kubernetes-dashboard
+        image: kubernetesui/dashboard:v2.7.0
+        ports:
+        - containerPort: 8443
+        volumeMounts:
+        - mountPath: /certs
+          name: kubernetes-dashboard-certs
+        - mountPath: /tmp
+          name: tmp-volume
+      volumes:
+      - name: kubernetes-dashboard-certs
+        emptyDir: {}
+      - name: tmp-volume
+        emptyDir: {}
+---
 # dashboard-rbac.yaml - Exposing dashboard with admin privileges
 apiVersion: v1
 kind: ServiceAccount
@@ -340,13 +381,17 @@ kind: Service
 metadata:
   name: kubernetes-dashboard
   namespace: vulnerable-app
+  labels:
+    k8s-app: kubernetes-dashboard
 spec:
+  type: NodePort
   selector:
     k8s-app: kubernetes-dashboard
   ports:
-  - port: 443
-    targetPort: 8443
-  type: NodePort  # Exposing dashboard externally
+    - name: http
+      port: 80
+      targetPort: 9090
+      nodePort: 30880
 
 ---
 # Challenge Job that places a flag on nodes
