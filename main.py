@@ -132,7 +132,6 @@ def execute_attack_tree(attack_tree):
             )
             output = result.stdout.strip()
             print(f"✅ Output:\n{output}")
-
             # Dynamic flag capture from command output
             found_flags = re.findall(r'FLAG\{[^}]+\}', output)
             for flag in found_flags:
@@ -180,12 +179,21 @@ def execute_attack_tree(attack_tree):
     execute_step(root_step_id)
 
     print("\n🎯 Attack tree execution complete.")
-    if captured_flags:
-        print("Successfully captured flags:")
-        for flag in captured_flags:
-            print(f"  {flag}")
+    if attack_tree.name.lower().startswith("recon"):
+        print("\n🧠 Recon Summary:")
+        for step in executed_steps:
+            if step.result and step.result.stdout:
+                print(f"\n🔹 {step.name}")
+                print(step.result.stdout.strip())
+        print("\n🎯 Recon complete.")
     else:
-        print("No flags were captured during execution.")
+        if captured_flags:
+            print("\n✅ Flags captured:")
+            for flag in captured_flags:
+                print(f"🏁 {flag}")
+        else:
+            print("\n🎯 Attack tree execution complete.")
+            print("No flags were captured during execution.")
 
 def hack(hack_name):
     """

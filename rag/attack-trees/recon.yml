@@ -1,0 +1,84 @@
+attack:
+  name: "Initial Recon"
+  description: "Adaptive recon for Kubernetes, cloud, and local environments"
+
+  variables: []
+
+  steps:
+    - id: recon.0
+      name: "Who am I"
+      command: "id"
+      tags: ["recon", "identity"]
+      on_success:
+        - extract: "uid=(\\d+).*gid=(\\d+)"
+        - next: recon.1
+
+    - id: recon.1
+      name: "Check current user and groups"
+      command: "whoami && groups || id -Gn"
+      tags: ["recon"]
+      on_success:
+        - next: recon.2
+
+    - id: recon.2
+      name: "Check capabilities (if Linux)"
+      command: "if [ -f /proc/1/status ]; then capsh --print || getpcaps $$ || cat /proc/1/status; else echo 'Not Linux/container'; fi"
+      tags: ["recon", "privileges"]
+      on_success:
+        - next: recon.3
+
+    - id: recon.3
+      name: "OS and platform"
+      command: "uname -a && sw_vers 2>/dev/null || cat /etc/os-release 2>/dev/null || echo 'Unknown OS'"
+      tags: ["recon", "host"]
+      on_success:
+        - next: recon.4
+
+    - id: recon.4
+      name: "Check network interfaces and routing"
+      command: "ifconfig || ip a || echo 'No network info'"
+      tags: ["recon", "network"]
+      on_success:
+        - next: recon.5
+
+    - id: recon.5
+      name: "Environment variables"
+      command: "env"
+      tags: ["recon", "env"]
+      on_success:
+        - next: recon.6
+
+    - id: recon.6
+      name: "Mounted volumes and paths"
+      command: "mount || df -h"
+      tags: ["recon", "mount"]
+      on_success:
+        - next: recon.8
+
+    - id: recon.8
+      name: "Check cloud provider: AWS"
+      command: "curl -s http://169.254.169.254/latest/meta-data/ || echo 'Not AWS'"
+      tags: ["recon", "cloud"]
+      on_success:
+        - next: recon.9
+
+    - id: recon.9
+      name: "Check cloud provider: GCP"
+      command: "curl -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/?recursive=true || echo 'Not GCP'"
+      tags: ["recon", "cloud"]
+      on_success:
+        - next: recon.10
+
+    - id: recon.10
+      name: "List running processes"
+      command: "ps aux || ps -e"
+      tags: ["recon", "process"]
+      on_success:
+        - next: recon.11
+
+    - id: recon.11
+      name: "Look for source code or flags"
+      command: "find / -name '*.js' -o -name '*.html' -o -name '*flag*' 2>/dev/null | head -n 20"
+      tags: ["recon", "files"]
+      on_success:
+        - next: null
