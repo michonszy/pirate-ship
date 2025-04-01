@@ -6,6 +6,7 @@ import yaml
 import sys
 import openai
 import json
+from openai import OpenAI
 
 
 warnings.filterwarnings("ignore")
@@ -64,7 +65,6 @@ def get_kube_prompt():
 
 CLUSTER_IP = get_kube_prompt()
 HACK_NAME = "example_hack"
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class bcolors:
     HEADER = '\033[95m'
@@ -99,6 +99,7 @@ def execute_attack_tree(attack_tree):
     visited = set()
     variables = {var["name"]: var["value"] for var in attack_tree.get("variables", [])}
     captured_flags = []  # Stores only actually found flags
+    outputs = []
 
     def substitute_variables(text):
         for var, val in variables.items():
@@ -120,7 +121,7 @@ def execute_attack_tree(attack_tree):
 
         command = substitute_variables(step.get("command", ""))
         print(f"🔄 Running: {command}")
-
+        
         try:
             result = subprocess.run(
                 command,
@@ -131,6 +132,8 @@ def execute_attack_tree(attack_tree):
                 timeout=60
             )
             output = result.stdout.strip()
+            out = "Command: "+ str(command)+" \n Output: "+output
+            outputs.append(out)
             print(f"✅ Output:\n{output}")
             # Dynamic flag capture from command output
             found_flags = re.findall(r'FLAG\{[^}]+\}', output)
@@ -179,21 +182,22 @@ def execute_attack_tree(attack_tree):
     execute_step(root_step_id)
 
     print("\n🎯 Attack tree execution complete.")
-    if attack_tree.name.lower().startswith("recon"):
-        print("\n🧠 Recon Summary:")
-        for step in visited:
-            if step.result and step.result.stdout:
-                print(f"\n🔹 {step.name}")
-                print(step.result.stdout.strip())
+    if "recon" in attack_tree.get("name", "").lower():
+        print("\n🎯 Attack tree execution complete.")
+        f = open('recon_output.txt','w+')
+        print(outputs,file=f)
+        f.close()
+        print("\n🧠 Recon Summary in recon_output.txt")
         print("\n🎯 Recon complete.")
     else:
+        print("\n🎯 Attack tree execution complete.")
         if captured_flags:
-            print("\n✅ Flags captured:")
+            print("✅ Flags captured:")
             for flag in captured_flags:
                 print(f"🏁 {flag}")
         else:
-            print("\n🎯 Attack tree execution complete.")
             print("No flags were captured during execution.")
+
 
 def hack(hack_name):
     """
@@ -296,91 +300,101 @@ def status():
         print("  • Use: kubectl config use-context <context-name>\n")
         return True
 
+
 def auto_hack():
-    """Run reconnaissance and let GPT-driven AI decide next steps."""
+    """
+    Here the real magic happens! Execute fully automated GPT custom model powered hack!
+    """
     print("🧠 Starting automated hacking process...")
 
-    # Step 1: Run reconnaissance
-    recon_file = os.path.join('rag/attack-trees', "recon.yaml")
-    if not os.path.isfile(recon_file):
-        print("❌ Reconnaissance tree (recon.yaml) not found.")
-        return True
+    hack("recon")
+    print("Recon done")
 
-    with open(recon_file, "r") as f:
-        recon_tree = yaml.safe_load(f)
-    
-    outputs = []
-    variables = {}
-
-    def capture_output_from_tree(tree):
-        nonlocal variables, outputs
-        steps = {s["id"]: s for s in tree["steps"]}
-        start = tree.get("start", tree["steps"][0]["id"])
-
-        def run_step(sid):
-            step = steps.get(sid)
-            if not step: return
-            command = step.get("command")
-            if command:
-                print(f"🔍 Recon: {command}")
-                try:
-                    result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-                    out = result.stdout.strip()
-                    outputs.append({"command": command, "output": out})
-                    print(f"✅ {out}")
-                    for ex in step.get("extract", []):
-                        name = ex["name"]
-                        match = re.search(ex["regex"], out)
-                        if match:
-                            variables[name] = match.group(1)
-                except subprocess.CalledProcessError as e:
-                    outputs.append({"command": command, "output": e.stderr.strip()})
-                    print(f"❌ {e.stderr.strip()}")
-            if "next" in step:
-                run_step(step["next"])
-
-        run_step(start)
-
-    capture_output_from_tree(recon_tree)
-
-    # Step 2: Build GPT prompt
-    system_msg = {
+    full_convo = [{
         "role": "system",
-        "content": (
-            "You are an offensive Kubernetes penetration testing assistant. "
-            "Based on previous reconnaissance, respond with ready-to-run kubectl/bash commands. "
-            "Do not explain. Only return actual commands to run."
-        )
-    }
+        "content": "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. Respond only with ready-to-run commands based on previous output. Do not use placeholders or commentary. Do not provide commands you already know the answer for! Commands must not require interactive mode and must help find vulnerabilities."
+    }]
 
-    history = [
-        {"role": "user", "content": json.dumps(outputs, indent=2)}
-    ]
+    recon_content = open('recon_output.txt').read().strip() if os.path.exists('recon_output.txt') else "no recon output"
+    hints = input("If you want to give model some hints please paste them here or leave it empty: ").strip() or "no hints"
 
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o",  # Replace with your custom model if needed
-            messages=[system_msg] + history,
-            temperature=0.2
-        )
-        reply = response.choices[0].message["content"]
-        print("\n🤖 Suggested command(s):\n", reply)
+    full_convo.append({
+        "role": "user",
+        "content": f"Hints: {hints}\nRecon output:\n{recon_content}\nPlease begin."
+    })
 
-        # Step 3: Execute the commands
-        for line in reply.strip().splitlines():
-            if not line.strip(): continue
-            print(f"\n⚔️ Running: {line}")
-            try:
-                res = subprocess.run(line, shell=True, check=True, capture_output=True, text=True)
-                out = res.stdout.strip()
-                print(f"✅ Output:\n{out}")
-                # Optionally: feed this back for another GPT step
-            except subprocess.CalledProcessError as e:
-                print(f"❌ Failed:\n{e.stderr.strip()}")
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    except Exception as e:
-        print(f"❌ OpenAI API error: {e}")
-    
+    for i in range(20):
+        print(f"\n--- Iteration {i + 1} ---")
+        try:
+            response = client.chat.completions.create(
+                model="ft:gpt-4o-2024-08-06:magister:pirate-ship:BH9t563h",
+                messages=full_convo,
+                temperature=0.4
+            )
+
+            reply = response.choices[0].message.content.strip()
+            print("\n🤖 Suggested command(s):\n", reply)
+
+            full_convo.append({
+                "role": "assistant",
+                "content": reply
+            })
+
+            combined_output = ""
+            flag_found = False
+            found_flags = []
+
+            for line in reply.splitlines():
+                if not line.strip():
+                    continue
+                print(f"\n⚔️ Running: {line}")
+                try:
+                    res = subprocess.run(line, shell=True, check=True, capture_output=True, text=True)
+                    out = res.stdout.strip()
+                    print(f"✅ Output:\n{out}")
+                    combined_output += f"\nCommand: {line}\nOutput:\n{out}\n"
+
+                    # 🔍 Look for flag pattern
+                    flags = re.findall(r'flag\{.*?\}', out, flags=re.IGNORECASE)
+                    if flags:
+                        flag_found = True
+                        found_flags.extend(flags)
+
+                except subprocess.CalledProcessError as e:
+                    err = e.stderr.strip()
+                    print(f"❌ Failed:\n{err}")
+                    combined_output += f"\nCommand: {line}\nError:\n{err}\n"
+
+            full_convo.append({
+                "role": "user",
+                "content": combined_output.strip() or "No output from this command."
+            })
+
+            if flag_found:
+                print("\n🏁 Flag(s) found!")
+                for f in found_flags:
+                    print(f"📌 {f}")
+                with open("found_flags.txt", "a") as flagfile:
+                    for f in found_flags:
+                        flagfile.write(f"{f}\n")
+
+                cont = input("⚠️ Do you want to continue hacking? [y/N]: ").strip().lower()
+                if cont not in ("y", "yes"):
+                    print("🛑 Hacking session terminated by user.")
+                    break
+
+        except Exception as e:
+            print(f"❌ OpenAI API error: {e}")
+            break
+
+    with open("conversation_log.txt", "w") as f:
+        for msg in full_convo:
+            role = msg["role"].upper()
+            f.write(f"[{role}]\n{msg['content']}\n\n")
+
+    print("\n📜 Full conversation saved to 'conversation_log.txt'")
     return True
 
 
