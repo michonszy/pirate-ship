@@ -181,7 +181,7 @@ def execute_attack_tree(attack_tree):
     print("\n🎯 Attack tree execution complete.")
     if attack_tree.name.lower().startswith("recon"):
         print("\n🧠 Recon Summary:")
-        for step in executed_steps:
+        for step in visited:
             if step.result and step.result.stdout:
                 print(f"\n🔹 {step.name}")
                 print(step.result.stdout.strip())
