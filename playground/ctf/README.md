@@ -117,8 +117,22 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 - Services exposed externally that should be internal-only
 
 **Flag Locations**:
-- `FLAG{missing_network_policy}` – in  `backend-service` annotations
-- Flags reachable via unintended network access  
+```
+@app.route('/internal/admin')
+def admin_panel():
+    return jsonify({
+        'message': 'Internal admin API',
+        'flag': 'FLAG{missing_network_policy}',
+        'sensitive_data': 'This endpoint should not be accessible from outside'
+    })
+```
+find it:
+```
+kubectl exec -n <any> pod/<podname> -- curl http://backend-service:5000/internal/admin
+or 
+nmap backend-service -p 5000
+
+```
 
 ---
 
@@ -130,9 +144,15 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 - Absence of audit logs
 
 **Flag Locations**:
-- `FLAG{inadequate_logging}` – in `stealthy-job` job  
-- Exploitable through blind spots in observability  
+- `FLAG{inadequate_logging}` – in `stealthy-job` job places the flag
+```
+╰─➤  kubectl exec -n vulnerable-app -it pod/host-inspector -- sh
+/ # dmesg | grep FLAG
+/ #
+/ # grep FLAG /host/var/log/syslog
+Mar 31 23:59:59 containerd[1234]: FLAG{inadequate_logging}
 
+```
 ---
 
 ### 6. 🔑 Broken Authentication ✅
@@ -172,8 +192,12 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 - No PodSecurityPolicies applied
 
 **Flag Locations**:
-- `FLAG{insecure_k8s_deployment}` – in backend pod environment 
-
+- `FLAG{insecure_k8s_deployment}` – in backend pod environment
+```
+╰─➤  k exec -it backend-7c9c95f4bf-bvdlm -- sh
+# echo $FLAG
+FLAG{insecure_k8s_deployment}
+```
 ---
 
 ### 8. 🧾 Secrets Management Failures ✅
@@ -184,12 +208,11 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 - Passwords and connection strings in plaintext
 
 **Flag Locations**:
-- `FLAG{secrets_badly_managed}` – in `application-secrets` Secret  
 - `FLAG{sensitive_data_in_configmap}` – in `db-credentials` ConfigMap  
 
 ---
 
-### 9. ⚙️ Misconfigured Cluster Components ✅ (NEED FIX!!!)
+### 9. ⚙️ Misconfigured Cluster Components ✅
 
 **Details**:
 - Kubernetes Dashboard is exposed externally with **cluster-admin privileges**.
@@ -198,7 +221,7 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 - Services (e.g., dashboard, internal APIs) are exposed with `type: NodePort` or `LoadBalancer` and **lack ingress rules or authentication**.
 
 **How to Exploit**:
-- Access the **Kubernetes Dashboard** directly via NodePort (`/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/`).
+- Access the **Kubernetes Dashboard** 
 - View or modify high-privilege resources without authentication.
 - Deploy privileged or misconfigured pods without any admission controller blocking you.
 - Identify insecurely exposed services that allow interaction with the cluster's internals.
@@ -209,9 +232,9 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 **Example Recon Tips**:
 - Use `kubectl get svc -A` to discover externally exposed services.
 - Access the dashboard:
-  ```
-  kubectl port-forward -n kube-system svc/kubernetes-dashboard 8443:443
-  curl https://localhost:8443/
+```
+╰─➤  kubectl port-forward -n vulnerable-app svc/kubernetes-dashboard 8080:80    1 ↵
+http://localhost:8080/#/secret/vulnerable-app/dashboard-flag?namespace=vulnerable-app
 ```
 ---
 
@@ -233,3 +256,39 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 **Flag Locations**:
 - `FLAG{outdated_components}` – embedded in vulnerable image layers or metadata
   - e.g., use `docker history` on `michonszy/k8s-ctf-backend:v1` to extract the flag
+
+
+
+## User
+You are running this challenge with those privilages:
+| Command                          | Expected | Notes                                  |
+|----------------------------------|----------|----------------------------------------|
+| `kubectl auth can-i list pods`   | ✅       | Can list pod names                     |
+| `kubectl auth can-i get pods`    | ❌       | Prevents `kubectl get pod -o yaml`     |
+| `kubectl auth can-i describe pods` | ❌       | Also uses get under the hood           |
+| `kubectl auth can-i create pods/exec` | ✅ | Allows `kubectl exec`                 |
+| `kubectl auth can-i create pods/log` | ✅  | Allows `kubectl logs`                 |
+| `kubectl auth can-i get configmaps` | ✅    | Allows viewing leaked data in configmaps |
+| `kubectl auth can-i list configmaps` | ✅   | Can enumerate all configmaps           |
+| `kubectl auth can-i get secrets` | ❌       | Prevents reading any secrets           |
+| `kubectl auth can-i list secrets` | ❌      | Prevents secret enumeration            |
+| `kubectl auth can-i get namespaces` | ❌    | Can't see cluster-wide info            |
+| `kubectl auth can-i get events`  | ❌       | Prevents snooping runtime events/logs  |
+
+LOGIN AS ONE:
+```
+chmod +x player-kubeconfig.sh
+./player-kubeconfig.sh
+export KUBECONFIG=$PWD/kubeconfig-player.yaml
+```
+and you will see
+```
+╰─➤  kubectl get pods
+
+Error from server (Forbidden): pods is forbidden: User "system:serviceaccount:vulnerable-app:player" cannot list resource "pods" in API group "" in the namespace "vulnerable-app"
+```
+
+to get back to admin just use:
+```
+unset KUBECONFIG
+```

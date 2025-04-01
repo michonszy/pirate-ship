@@ -373,6 +373,15 @@ roleRef:
   kind: ClusterRole
   name: cluster-admin  # Giving dashboard admin privileges (very insecure)
   apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dashboard-flag
+  namespace: vulnerable-app
+type: Opaque
+data:
+  flag: RkxBR3ttaXNjb25maWd1cmVkX2Rhc2hib2FyZH0=
 
 ---
 # dashboard-service.yaml - Exposing dashboard externally (bad practice)
@@ -437,3 +446,105 @@ data:
     # - LimitRanger
     # - SecurityContextDeny
     # Flag: FLAG{missing_admission_controls}
+---
+# stealthy-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stealthy-job
+  namespace: vulnerable-app
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      hostPID: true
+      serviceAccountName: vulnerable-sa
+      containers:
+      - name: stealthy
+        image: alpine:latest
+        securityContext:
+          privileged: true
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            apk add --no-cache util-linux;
+            echo "Mar 31 23:59:59 containerd[1234]: FLAG{inadequate_logging}" >> /host/var/log/syslog;
+            echo "Stealth job complete"
+        volumeMounts:
+        - name: host-logs
+          mountPath: /host
+      volumes:
+      - name: host-logs
+        hostPath:
+          path: /
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: player
+  namespace: vulnerable-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: player-role
+  namespace: vulnerable-app
+rules:
+- apiGroups: [""]
+  resources:
+    - pods
+  verbs:
+    - list
+- apiGroups: [""]
+  resources:
+    - pods/exec
+    - pods/log
+  verbs:
+    - create
+- apiGroups: [""]
+  resources:
+    - configmaps
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups: [""]
+  resources:
+    - secrets
+  verbs: [""]
+
+---
+# player-sa-token.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: player-sa-token
+  namespace: vulnerable-app
+  annotations:
+    kubernetes.io/service-account.name: player
+type: kubernetes.io/service-account-token
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: host-inspector
+  namespace: vulnerable-app
+spec:
+  hostPID: true
+  hostNetwork: true
+  serviceAccountName: vulnerable-sa
+  containers:
+  - name: alpine
+    image: alpine:latest
+    command: ["sh", "-c", "sleep infinity"]
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: host-logs
+      mountPath: /host
+  volumes:
+  - name: host-logs
+    hostPath:
+      path: /
+      type: Directory
