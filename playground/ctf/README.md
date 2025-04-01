@@ -64,198 +64,188 @@ Each vulnerability is deliberately implemented and has one or more flags to capt
 
 ---
 
-### 1. 🛠️ Insecure Workload Configurations ✅
+### 1. 🛠️ Insecure Workload Configurations
+Goal: Show how misconfigured containers (privileged, hostPath, etc.) lead to host compromise.
 
-**Details**:
-- Frontend pod runs with `privileged: true`
-- Containers granted excessive capabilities: `add: ["ALL"]`
-- `hostPath` mount exposes entire host filesystem (`/`)
-- Containers run as root (`runAsUser: 0`)
-- Writable root filesystems (`readOnlyRootFilesystem: false`)
-- `allowPrivilegeEscalation: true` in backend pod
-
-**Flag Locations**:
-- `FLAG{node_compromise_via_hostpath}` – via `/host/tmp/k8s-node-flag.txt`  
-- `FLAG{privileged_admin_pod}` – inside `admin-tools` pod at `/root/flag.txt`  
-
----
-
-### 2. 🔗 Supply Chain Vulnerabilities ✅
-
-**Details**:
-- Backdoored Docker images
-- No image signature verification
-- No enforced vulnerability scanning
-- Malicious code included in containers
-
-**Flag Locations**:
-- `FLAG{backdoor_in_maintenance_script}` – embedded in Docker image  
-- `FLAG{docker_image_history_leak}` – found in image history layers  
-
----
-
-### 3. 🔓 Overly Permissive RBAC Configurations ✅
-
-**Details**:
-- `vulnerable-sa` ServiceAccount with excessive privileges
-- ClusterRole grants broad access to pods, secrets, and deployments
-- ClusterRoleBinding provides admin-level access
-- Misconfigured Kubernetes Dashboard with `cluster-admin`
-
-**Flag Locations**:
-- `FLAG{overly_permissive_rbac}` – in annotations of service account with excessive priveleges
-- Additional flags accessible via privileged role abuse  
-
----
-
-### 4. 🌐 Lack of Network Segmentation ✅
-
-**Details**:
-- No `NetworkPolicies` defined
-- Full mesh pod communication
-- No separation between frontend, backend, and database
-- Services exposed externally that should be internal-only
-
-**Flag Locations**:
+Flags:
 ```
-@app.route('/internal/admin')
-def admin_panel():
-    return jsonify({
-        'message': 'Internal admin API',
-        'flag': 'FLAG{missing_network_policy}',
-        'sensitive_data': 'This endpoint should not be accessible from outside'
-    })
-```
-find it:
-```
-kubectl exec -n <any> pod/<podname> -- curl http://backend-service:5000/internal/admin
-or 
-nmap backend-service -p 5000
+FLAG{node_compromise_via_hostpath} — via hostPath
 
+FLAG{privileged_admin_pod} — in admin-tools pod
 ```
 
----
-
-### 5. 📉 Inadequate Logging and Monitoring ✅
-
-**Details**:
-- Applications run in `DEBUG` mode
-- No centralized logging or monitoring tools
-- Absence of audit logs
-
-**Flag Locations**:
-- `FLAG{inadequate_logging}` – in `stealthy-job` job places the flag
-```
-╰─➤  kubectl exec -n vulnerable-app -it pod/host-inspector -- sh
-/ # dmesg | grep FLAG
-/ #
-/ # grep FLAG /host/var/log/syslog
-Mar 31 23:59:59 containerd[1234]: FLAG{inadequate_logging}
+How to get:
 
 ```
----
-
-### 6. 🔑 Broken Authentication ✅
-
-**Details**:
-- Hardcoded admin credentials exposed in frontend code and environment variables.
-- Admin panel exposed at `/admin` without proper access control.
-- API keys stored in plaintext in ConfigMaps and environment variables.
-- Backend accepts insecure tokens or uses predictable authentication.
-
-**How to Exploit**:
-- Inspect frontend JavaScript or HTML comments to discover default credentials.
-- Enumerate environment variables or config maps via pod access.
-- Bypass authentication by sending predictable or static tokens to the API.
-
-**Flag Location**:
-- `FLAG{broken_authentication}` – visible **only after logging into `/admin`** or calling a restricted backend API using leaked credentials.
+kubectl exec admin-tools -n vulnerable-app -- cat /root/flag.txt
+kubectl exec <any-pod> -n vulnerable-app -- cat /host/tmp/k8s-node-flag.txt
 ```
-╰─➤  curl -X POST http://localhost:5000/api/login \                           130 ↵
+Checks:
+* Verify that admin-tools is running privileged
+* Check /host/tmp/k8s-node-flag.txt is placed via the job
+
+### 2. 🔗 Supply Chain Vulnerabilities
+Goal: Show how unverified/backdoored images leak data.
+
+
+Flags:
+```
+FLAG{backdoor_in_maintenance_script}
+
+FLAG{docker_image_history_leak}
+```
+How to get:
+
+Pull image:
+```
+docker pull michonszy/k8s-ctf-backend:v1
+docker history michonszy/k8s-ctf-backend:v1
+```
+Run container & inspect:
+```
+docker run -it michonszy/k8s-ctf-backend:v1 sh
+```
+Checks:
+* One flag should be exposed in docker history
+* Another should be inside a file in /opt/ or entrypoint.sh
+
+### 3. 🔓 Overly Permissive RBAC
+Goal: Show how excessive permissions lead to privilege escalation.
+
+
+Flag:
+```
+FLAG{overly_permissive_rbac} — annotation in ServiceAccount
+```
+How to get:
+```
+kubectl get sa vulnerable-sa -n vulnerable-app -o yaml | grep FLAG
+```
+Checks:
+* Ensure ClusterRoleBinding exists and grants cluster-admin to vulnerable-sa
+
+### 4. 🌐 Lack of Network Segmentation
+Goal: Show how missing NetworkPolicies allow lateral movement.
+
+Flag:
+```
+FLAG{missing_network_policy} — only visible from internal pod access
+```
+How to get:
+```
+kubectl exec backend-xxxx -n vulnerable-app -- curl http://backend-service:5000/internal/admin
+```
+Checks:
+/internal/admin endpoint returns flag and is only reachable because of missing NetworkPolicy
+
+## 5. 📉 Inadequate Logging and Monitoring
+Goal: Show that blind-spot activities (privileged pod logs) go unnoticed.
+
+Flag:
+```
+FLAG{inadequate_logging} — in simulated syslog on host
+```
+
+How to get:
+```
+kubectl exec host-inspector -n vulnerable-app -- grep FLAG /host/var/log/syslog
+```
+Checks:
+* Confirm stealthy-job ran and wrote to /host/var/log/syslog
+* host-inspector should have hostPath to read it
+
+### 6. 🔑 Broken Authentication
+Goal: Show weak or leaked credentials can bypass protection.
+
+Flag:
+```
+FLAG{broken_authentication} — visible after admin login
+```
+
+How to get:
+```
+kubectl expose backend
+curl -X POST http://<backend-url>:5000/api/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin", "password":"super_admin_password"}'
-
-{
-  "flag": "FLAG{broken_authentication}",
-  "message": "Welcome admin",
-  "success": true,
-  "token": "YWRtaW46c3VwZXJfYWRtaW5fcGFzc3dvcmQ="
-}
+  -d '{"username":"admin","password":"super_admin_password"}'
 ```
----
+Checks:
+* Flag is only returned for valid login
+* Credentials are leaked in frontend HTML/JS
 
-### 7. 🔐 Missing Security Context ✅
+### 7. 🔐 Missing Security Context
+Goal: Show insecure container defaults allow risk.
 
-**Details**:
-- No `securityContext`, seccomp, or AppArmor profiles defined
-- Containers running with default security settings
-- No PodSecurityPolicies applied
-
-**Flag Locations**:
-- `FLAG{insecure_k8s_deployment}` – in backend pod environment
+Flag:
 ```
-╰─➤  k exec -it backend-7c9c95f4bf-bvdlm -- sh
-# echo $FLAG
-FLAG{insecure_k8s_deployment}
+FLAG{insecure_k8s_deployment} — stored in backend pod’s env var
 ```
----
-
-### 8. 🧾 Secrets Management Failures ✅
-
-**Details**:
-- Sensitive data stored in ConfigMaps instead of Secrets
-- No encryption at rest
-- Passwords and connection strings in plaintext
-
-**Flag Locations**:
-- `FLAG{sensitive_data_in_configmap}` – in `db-credentials` ConfigMap  
-
----
-
-### 9. ⚙️ Misconfigured Cluster Components ✅
-
-**Details**:
-- Kubernetes Dashboard is exposed externally with **cluster-admin privileges**.
-- No authentication required to access the dashboard (`ClusterRoleBinding` is wide open).
-- Critical **admission controllers** (like `PodSecurityPolicy`, `LimitRanger`, `SecurityContextDeny`) are **not enabled** — simulated via ConfigMap.
-- Services (e.g., dashboard, internal APIs) are exposed with `type: NodePort` or `LoadBalancer` and **lack ingress rules or authentication**.
-
-**How to Exploit**:
-- Access the **Kubernetes Dashboard** 
-- View or modify high-privilege resources without authentication.
-- Deploy privileged or misconfigured pods without any admission controller blocking you.
-- Identify insecurely exposed services that allow interaction with the cluster's internals.
-
-**Flag Locations**:
-- `FLAG{misconfigured_dashboard}` – visible in the Dashboard UI or a secret accessible from the Dashboard session.
-
-**Example Recon Tips**:
-- Use `kubectl get svc -A` to discover externally exposed services.
-- Access the dashboard:
+How to get:
 ```
-╰─➤  kubectl port-forward -n vulnerable-app svc/kubernetes-dashboard 8080:80    1 ↵
-http://localhost:8080/#/secret/vulnerable-app/dashboard-flag?namespace=vulnerable-app
+kubectl exec backend-xxxx -n vulnerable-app -- printenv FLAG
 ```
----
+Checks:
+* No securityContext, seccomp, AppArmor, etc.
+* Flag stored only in runtime, not in manifest
 
-### 10. 🧟‍♂️ Outdated and Vulnerable Kubernetes Components ✅
+### 8. 🧾 Secrets Management Failures
+Goal: Show improper handling of sensitive data.
 
-**Details**:
-- Containers run on outdated base images with known CVEs (e.g., `alpine:3.10`, `python:3.6`, `ubuntu:16.04`)
-- No image scanning or update policy is enforced
-- Simulates the risk of using deprecated components or unpatched dependencies
-- Kubernetes version simulates outdated behavior (no PodSecurity admission, legacy APIs)
 
-**How to Exploit**:
-- Use `kubectl describe pod` or `kubectl get pods -o yaml` to inspect image tags
-- Pull the container images locally and analyze them with tools like:
-  - `trivy`, `grype`, or `docker scan` to find known vulnerabilities
-- Examine image history (`docker history`) for sensitive data or backdoored layers
-- Abuse outdated behaviors (e.g., insecure defaults, writable `/tmp`, known exploits in base binaries)
+Flags:
+```
+FLAG{sensitive_data_in_configmap} — in db-credentials ConfigMap
+FLAG{secrets_badly_managed} — in application-secrets Secret
+```
 
-**Flag Locations**:
-- `FLAG{outdated_components}` – embedded in vulnerable image layers or metadata
-  - e.g., use `docker history` on `michonszy/k8s-ctf-backend:v1` to extract the flag
+How to get (ConfigMap):
+```
+kubectl get configmap db-credentials -n vulnerable-app -o yaml | grep FLAG
+```
+Secret should be inaccessible to player via command line
+
+Checks:
+* Player role allows access to ConfigMaps only
+* application-secrets contains base64-encoded flag
+
+### 9. ⚙️ Misconfigured Cluster Components
+Goal: Show misconfig exposes full control via Dashboard.
+
+Flag:
+```
+FLAG{misconfigured_dashboard} — stored in dashboard-flag Secret, visible via Dashboard UI
+```
+How to get:
+```
+Forward Dashboard: kubectl port-forward -n vulnerable-app svc/kubernetes-dashboard 9090:9090
+Open: http://localhost:9090
+```
+
+Use full admin access to navigate to: Secrets > dashboard-flag
+
+Checks:
+* Dashboard runs as cluster-admin SA
+* No auth is required (NodePort exposed)
+
+### 10. 🧟‍♂️ Outdated Kubernetes Components
+Goal: Show risk of running outdated base images with known CVEs.
+
+Flag:
+```
+FLAG{outdated_components} — hidden in outdated Docker image
+```
+How to get:
+```
+docker pull michonszy/k8s-ctf-frontend:v1
+docker history michonszy/k8s-ctf-frontend:v1 | grep FLAG
+```
+Or check within container:
+```
+docker run -it michonszy/k8s-ctf-frontend:v1 sh
+```
+Checks:
+* Image uses old Alpine or Python version
+* Flag embedded in layer or image label
 
 
 
