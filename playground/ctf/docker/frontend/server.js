@@ -66,7 +66,7 @@ app.get('/', (req, res) => {
     <body>
       <h1>Welcome to the Vulnerable App</h1>
       <p>This application has multiple vulnerabilities. Can you find them all?</p>
-      <!-- Note: Remove before production. Admin access at /admin with password "${adminPassword}" -->
+      <!-- Note: Remove before production. Admin access for user admin at /api/login with password "${adminPassword}. Only in backend api!" -->
       <div id="content"></div>
       <script>
         // Vulnerable to XSS

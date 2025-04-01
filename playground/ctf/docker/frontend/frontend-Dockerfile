@@ -22,7 +22,7 @@ RUN echo "FLAG{docker_image_history_leak}" > /tmp/build_flag.txt && \
 COPY . .
 
 # Set environment variables with sensitive information
-ENV ADMIN_PASSWORD="d3fault_adm1n_p@ss"
+ENV ADMIN_PASSWORD="super_admin_password"
 ENV API_KEY="ey1234secretapikeyhere5678"
 ENV DEBUG=true
 ENV HIDDEN_FLAG="FLAG{environment_variables_exposure_frontend}"

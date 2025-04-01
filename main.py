@@ -76,15 +76,124 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
-
 def validate_attack_tree(attack_tree):
-    if "steps" not in attack_tree or not isinstance(attack_tree["steps"], list):
-        raise ValueError("❌ Error: Invalid attack tree format. 'steps' key must be a list.")
+    # Try both flat and nested formats
+    if "steps" in attack_tree and isinstance(attack_tree["steps"], list):
+        return "flat"
+    elif "attack" in attack_tree and "steps" in attack_tree["attack"] and isinstance(attack_tree["attack"]["steps"], list):
+        return "nested"
+    else:
+        raise ValueError("❌ Error: Invalid attack tree format. No valid 'steps' list found.")
+
+def execute_attack_tree(attack_tree):
+    """
+    Execute a structured attack tree with support for nested 'attack' block.
+    Dynamically captures any FLAG{...} patterns found in command outputs.
+    """
+    format_type = validate_attack_tree(attack_tree)
+
+    if format_type == "nested":
+        attack_tree = attack_tree["attack"]
+
+    steps = {step["id"]: step for step in attack_tree["steps"]}
+    visited = set()
+    variables = {var["name"]: var["value"] for var in attack_tree.get("variables", [])}
+    captured_flags = []  # Stores only actually found flags
+
+    def substitute_variables(text):
+        for var, val in variables.items():
+            text = text.replace(f"${{{var}}}", val)
+        return text
+
+    def execute_step(step_id):
+        if step_id in visited:
+            print(f"⚠️ Step {step_id} already executed. Skipping.")
+            return
+        visited.add(step_id)
+
+        step = steps.get(step_id)
+        if not step:
+            print(f"❌ No step with ID: {step_id}")
+            return
+
+        print(f"\n➡️ Executing step: {step.get('name', step_id)}")
+
+        command = substitute_variables(step.get("command", ""))
+        print(f"🔄 Running: {command}")
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            output = result.stdout.strip()
+            print(f"✅ Output:\n{output}")
+
+            # Dynamic flag capture from command output
+            found_flags = re.findall(r'FLAG\{[^}]+\}', output)
+            for flag in found_flags:
+                if flag not in captured_flags:
+                    captured_flags.append(flag)
+                    print(f"🏴 Captured flag: {flag}")
+
+            # Handle on_success actions (excluding YAML flag declarations)
+            if step.get("on_success"):
+                for action in step["on_success"]:
+                    if isinstance(action, dict) and "remediate" in action:
+                        print(f"💡 Suggested fix: {action['remediate']}")
+                    elif isinstance(action, dict) and "next" in action:
+                        execute_step(action["next"])
+
+        except subprocess.TimeoutExpired:
+            print(f"⏰ Command timed out after 60 seconds: {command}")
+            output = f"Command timed out after 60 seconds: {command}"
+            raise subprocess.CalledProcessError(1, command, output)
+
+        except subprocess.CalledProcessError as e:
+            output = e.output.strip() if e.output else e.stderr.strip()
+            print(f"❌ Command failed:\n{output}")
+
+            # Also check for flags in error output
+            found_flags = re.findall(r'FLAG\{[^}]+\}', output)
+            for flag in found_flags:
+                if flag not in captured_flags:
+                    captured_flags.append(flag)
+                    print(f"🏴 Captured flag in error output: {flag}")
+
+            # Failure handling
+            if step.get("on_failure"):
+                for action in step["on_failure"]:
+                    if isinstance(action, dict) and "next" in action:
+                        print(f"⏭️ Proceeding to next step after failure: {action['next']}")
+                        execute_step(action["next"])
+                    elif isinstance(action, dict) and "remediate" in action:
+                        print(f"💡 Suggested fix: {action['remediate']}")
+            elif step.get("next"):
+                print(f"⏭️ Proceeding to next step: {step['next']}")
+                execute_step(step["next"])
+
+    root_step_id = attack_tree.get("start") or attack_tree["steps"][0]["id"]
+    execute_step(root_step_id)
+
+    print("\n🎯 Attack tree execution complete.")
+    if captured_flags:
+        print("Successfully captured flags:")
+        for flag in captured_flags:
+            print(f"  {flag}")
+    else:
+        print("No flags were captured during execution.")
 
 def hack(hack_name):
+    """
+    Everything setted up? Let's execute this!
+    """
     print(f"Executing hack: {hack_name}")
     
-    yaml_file = f"{hack_name}.yaml"
+    yaml_file = f"rag/attack-trees/{hack_name}.yml"
     if not os.path.isfile(yaml_file):
         yaml_file_alt = f"{hack_name}.yml"
         if os.path.isfile(yaml_file_alt):
@@ -110,93 +219,6 @@ def hack(hack_name):
     print(f"✅ Successfully executed hack: {hack_name}")
     return True
 
-def execute_attack_tree(attack_tree):
-    """
-    Execute a structured attack tree with preconditions, variable substitution, and conditional logic.
-    """
-    steps = {step["id"]: step for step in attack_tree["steps"]}
-    visited = set()
-    variables = {}
-    captured_flags = []
-
-    def substitute_variables(text):
-        for var, val in variables.items():
-            text = text.replace(f"{{{{ {var} }}}}", val)
-        return text
-
-    def check_preconditions(preconds):
-        for p in preconds:
-            var = p.get("variable")
-            match = p.get("match")
-            if var not in variables or not re.search(match, variables[var]):
-                return False
-        return True
-
-    def execute_step(step_id):
-        if step_id in visited:
-            print(f"⚠️ Step {step_id} already executed. Skipping.")
-            return
-        visited.add(step_id)
-
-        step = steps.get(step_id)
-        if not step:
-            print(f"❌ No step with ID: {step_id}")
-            return
-
-        print(f"\n➡️ Executing step: {step.get('name', step_id)}")
-
-        if "preconditions" in step and not check_preconditions(step["preconditions"]):
-            print("⏭ Preconditions not met. Skipping.")
-            return
-
-        command = substitute_variables(step.get("command", ""))
-        print(f"🔄 Running: {command}")
-
-        try:
-            result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
-            output = result.stdout.strip()
-            print(f"✅ Output:\n{output}")
-        except subprocess.CalledProcessError as e:
-            output = e.output.strip() if e.output else e.stderr.strip()
-            print(f"❌ Command failed:\n{output}")
-
-        for extract in step.get("extract", []):
-            name = extract["name"]
-            pattern = extract["regex"]
-            match = re.search(pattern, output)
-            if match:
-                value = match.group(1)
-                variables[name] = value
-                print(f"📥 Extracted variable '{name}' = '{value}'")
-
-        if step.get("capture_flag", False):
-            flag_match = re.search(r"flag\{.*?\}", output)
-            if flag_match:
-                flag = flag_match.group(0)
-                captured_flags.append(flag)
-                print(f"🏴 Flag found: {flag}")
-            else:
-                print("Unable to find a flag which should be here")
-
-        if "next" in step:
-            next_step_id = substitute_variables(step["next"])
-            execute_step(next_step_id)
-        elif "conditions" in step:
-            for cond in step["conditions"]:
-                pattern = cond.get("match")
-                target_step = cond.get("next")
-                if re.search(pattern, output):
-                    execute_step(substitute_variables(target_step))
-                    break
-
-    root_step_id = attack_tree.get("start") or attack_tree["steps"][0]["id"]
-    execute_step(root_step_id)
-
-    print("\n🎯 Attack tree complete.")
-    if captured_flags:
-        print("Captured flags:")
-        for f in captured_flags:
-            print(f"  {f}")
 
 def list_hacks():
     """
