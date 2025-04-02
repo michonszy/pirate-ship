@@ -1,0 +1,14 @@
+Challenge 1:
+Hints: You've hacked into a low-privileged AWS EKS pod. Use the web terminal below to find flags across the environment. Each challenge runs in a different Kubernetes namespaces with varying permissions. All K8s resources are crucial; challenges are based on real EKS misconfigurations and security issues. First challenge is called Secret Seeker. Jumpstart your quest by listing all the secrets in the cluster. Can you spot the flag among them?
+
+Challenge 2:
+You've hacked into a low-privileged AWS EKS pod. This challenge is called Registry Hunt. A thing we learned during our research: always check the container registries. For your convenience, the crane utility is already pre-installed on the machine.
+
+Challenge 3:
+Hints: You've hacked into a low-privileged AWS EKS pod. This challenge is called Image Inquisition. A pod's image holds more than just code. Dive deep into its ECR repository, inspect the image layers, and uncover the hidden secret. Remember: You are running inside a compromised EKS pod.For your convenience, the crane utility is already pre-installed on the machine.
+
+Challenge 4:
+You've hacked into a low-privileged AWS EKS pod. This challenge is called Pod Break.You're inside a vulnerable pod on an EKS cluster. Your pod's service-account has no permissions. Can you navigate your way to access the EKS Node's privileged service-account? Please be aware: Due to security considerations aimed at safeguarding the CTF infrastructure, the node has restricted permissions.
+
+Challenge 5:
+

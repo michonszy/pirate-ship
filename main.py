@@ -4,11 +4,14 @@ import subprocess
 import re
 import yaml
 import sys
-import openai
-import json
+from dotenv import load_dotenv
 from openai import OpenAI
+import chromadb
 
-
+load_dotenv()
+TOOL_NAMES = ["trivy"]
+CHROMA_PATH = "chroma_db"
+NUM_RESULTS = 1
 warnings.filterwarnings("ignore")
 
 art=r"""
@@ -300,6 +303,133 @@ def status():
         print("  • Use: kubectl config use-context <context-name>\n")
         return True
 
+def read_large_input():
+    print("📥 Paste the output (or skip or exit): ")
+    input_chunks = []
+    while True:
+        chunk = input()
+        if chunk == "":  # Empty input indicates the user is done
+            break
+        input_chunks.append(chunk)
+    return "\n".join(input_chunks)
+
+def interactive_hack():
+    """
+    You want to use auto hack but you can't clone this repo in a CTF enviroment? No worries! That is why I created this interactive hack mode!
+    """
+
+    recon_content = open('recon_output.txt').read().strip() if os.path.exists('recon_output.txt') else "no recon output"
+    hints = input("If you want to give model some hints please paste them here or leave it empty: ").strip() or "no hints"
+    rag_query = f"{hints}\n{recon_content}"
+
+    # RAG setup
+    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    tools_mentioned = [tool for tool in TOOL_NAMES if tool.lower() in rag_query.lower()]
+    collections_to_query = ["attack_paths", "conversation_histories"]
+    if tools_mentioned:
+        collections_to_query.append("tools_documentation")
+
+    retrieved_chunks = []
+    for name in collections_to_query:
+        collection = chroma_client.get_or_create_collection(name=name)
+        results = collection.query(query_texts=[rag_query], n_results=NUM_RESULTS)
+        docs = results.get("documents", [[]])[0] if results.get("documents") else []
+        if docs:
+            retrieved_chunks.append(f"\n## From {name}:\n" + "\n".join(f"[{i+1}] {doc.strip()}" for i, doc in enumerate(docs)))
+
+    rag_context = "\n".join(retrieved_chunks) if retrieved_chunks else "No relevant context retrieved."
+
+    full_convo = [{
+        "role": "system",
+        "content": (
+            "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. "
+            "Respond only with ready-to-run commands based on previous output. You must know every variable, do not provide placeholders or unknown values. "
+            "Do not add comments, only commands! Focus your attack on the hints you are receiving!"
+            "Below you might found some RAG obtained content, check if it's helpfull for you."
+            "--- Retrieved RAG Context ---\n"
+            f"{rag_context}\n"
+            "-----------------------------"
+        )
+    }]
+
+    full_convo.append({
+        "role": "user",
+        "content": f"Hints: {hints}\nRecon output:\n{recon_content}\nPlease begin."
+    })
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    for i in range(200):
+        print(f"\n--- Iteration {i + 1} ---")
+        try:
+            response = client.chat.completions.create(
+                model="ft:gpt-4o-2024-08-06:magister:pirate-ship:BH9t563h",
+                messages=full_convo,
+                temperature=0.4
+            )
+
+            reply = response.choices[0].message.content.strip()
+            print("\n🤖 Suggested command(s):\n", reply)
+
+            full_convo.append({
+                "role": "assistant",
+                "content": reply
+            })
+
+            combined_output = ""
+            flag_found = False
+            found_flags = []
+
+            for line in reply.splitlines():
+                if not line.strip():
+                    continue
+                print(f"\n⚔️ Command: {line}")
+                user_out = read_large_input()
+                if user_out == "exit":
+                    print("🛑 Session terminated by user.")
+                    with open("conversation_log.txt", "w") as f:
+                        for msg in full_convo:
+                            role = msg["role"].upper()
+                            f.write(f"[{role}]\n{msg['content']}\n\n")
+                    return True
+                elif user_out == "skip":
+                    combined_output += f"\nCommand: {line}\nSkipped by user.\n"
+                else:
+                    combined_output += f"\nCommand: {line}\nOutput:\n{user_out}\n"
+                    flags = re.findall(r'flag\{.*?\}', user_out, flags=re.IGNORECASE)
+                    if flags:
+                        flag_found = True
+                        found_flags.extend(flags)
+
+            full_convo.append({
+                "role": "user",
+                "content": combined_output.strip() or "No output from this command."
+            })
+
+            if flag_found:
+                print("\n🏁 Flag(s) found!")
+                for f in found_flags:
+                    print(f"📌 {f}")
+                with open("found_flags.txt", "a") as flagfile:
+                    for f in found_flags:
+                        flagfile.write(f"{f}\n")
+
+                cont = input("⚠️ Do you want to continue hacking? [y/N]: ").strip().lower()
+                if cont not in ("y", "yes"):
+                    print("🛑 Hacking session terminated by user.")
+                    return True
+
+        except Exception as e:
+            print(f"❌ OpenAI API error: {e}")
+            return True
+
+    with open("conversation_log.txt", "w") as f:
+        for msg in full_convo:
+            role = msg["role"].upper()
+            f.write(f"[{role}]\n{msg['content']}\n\n")
+
+    print("\n📜 Full conversation saved to 'conversation_log.txt'")
+    return True
 
 def auto_hack():
     """
@@ -427,7 +557,8 @@ COMMANDS = {
     "setup": setup,
     "hack": lambda: hack(HACK_NAME),
     "list": list_hacks,
-    "auto": auto_hack
+    "auto": auto_hack,
+    'interactive_ai': interactive_hack
 
 }
 
