@@ -174,7 +174,7 @@
       },
       {
         "role": "user",
-        "content": "Command: cat flag.txt\nOutput:\nwiz_eks_challenge{nothing_can_be_said_to_be_certain_except_death_taxes_and_the_exisitense_of_misconfigured_imagepullsecret}"
+        "content": "Command: cat flag.txt\nOutput:\nwiz_eks_challenge{...}"
       },
       {
         "role": "assistant",

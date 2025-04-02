@@ -37,7 +37,7 @@ attack:
 
     - id: 1.3
       name: "Base64 decode secret flag value"
-      command: "echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b21nX292ZXJfcHJpdmlsZWdlZF9zZWNyZXRfYWNjZXNzfQ==\" | base64 -d"
+      command: "echo \"...==\" | base64 -d"
       on_success:
-        - capture_flag: "wiz_eks_challenge{omg_over_privileged_secret_access}"
+        - capture_flag: "wiz_eks_challenge{...}"
         - remediate: "Restrict service account RBAC to avoid secret access"

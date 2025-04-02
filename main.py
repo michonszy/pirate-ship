@@ -12,6 +12,7 @@ load_dotenv()
 TOOL_NAMES = ["trivy"]
 CHROMA_PATH = "chroma_db"
 NUM_RESULTS = 1
+TOKENIZERS_PARALLELISM=False
 warnings.filterwarnings("ignore")
 
 art=r"""
@@ -319,36 +320,15 @@ def interactive_hack():
     """
 
     recon_content = open('recon_output.txt').read().strip() if os.path.exists('recon_output.txt') else "no recon output"
-    hints = input("If you want to give model some hints please paste them here or leave it empty: ").strip() or "no hints"
-    rag_query = f"{hints}\n{recon_content}"
-
-    # RAG setup
-    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-    tools_mentioned = [tool for tool in TOOL_NAMES if tool.lower() in rag_query.lower()]
-    collections_to_query = ["attack_paths", "conversation_histories"]
-    if tools_mentioned:
-        collections_to_query.append("tools_documentation")
-
-    retrieved_chunks = []
-    for name in collections_to_query:
-        collection = chroma_client.get_or_create_collection(name=name)
-        results = collection.query(query_texts=[rag_query], n_results=NUM_RESULTS)
-        docs = results.get("documents", [[]])[0] if results.get("documents") else []
-        if docs:
-            retrieved_chunks.append(f"\n## From {name}:\n" + "\n".join(f"[{i+1}] {doc.strip()}" for i, doc in enumerate(docs)))
-
-    rag_context = "\n".join(retrieved_chunks) if retrieved_chunks else "No relevant context retrieved."
+    print("If you want to give model some hints please paste them here or leave it empty: ")
+    hints = read_large_input().strip() or "no hints"
 
     full_convo = [{
         "role": "system",
         "content": (
             "You are a penetration testing assistant helping a security researcher evaluate the security of their Kubernetes cluster. "
             "Respond only with ready-to-run commands based on previous output. You must know every variable, do not provide placeholders or unknown values. "
-            "Do not add comments, only commands! Focus your attack on the hints you are receiving!"
-            "Below you might found some RAG obtained content, check if it's helpfull for you."
-            "--- Retrieved RAG Context ---\n"
-            f"{rag_context}\n"
-            "-----------------------------"
+            "Do not add comments, only commands! Focus your attack on the hints!"
         )
     }]
 
@@ -365,7 +345,7 @@ def interactive_hack():
             response = client.chat.completions.create(
                 model="ft:gpt-4o-2024-08-06:magister:pirate-ship:BH9t563h",
                 messages=full_convo,
-                temperature=0.4
+                temperature=0.3
             )
 
             reply = response.choices[0].message.content.strip()
@@ -400,7 +380,29 @@ def interactive_hack():
                     if flags:
                         flag_found = True
                         found_flags.extend(flags)
+                        
+                # RAG setup
+                chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+                tools_mentioned = [tool for tool in TOOL_NAMES if tool.lower() in combined_output.lower()]
+                collections_to_query = ["attack_paths", "conversation_histories"]
+                if tools_mentioned:
+                    collections_to_query.append("tools_documentation")
+                    
+                retrieved_chunks = []
+                for name in collections_to_query:
+                    collection = chroma_client.get_or_create_collection(name=name)
+                    results = collection.query(query_texts=[combined_output], n_results=NUM_RESULTS)
+                    docs = results.get("documents", [[]])[0] if results.get("documents") else []
+                    if docs:
+                        retrieved_chunks.append(f"\n## From {name}:\n" + "\n".join(f"[{i+1}] {doc.strip()}" for i, doc in enumerate(docs)))
 
+                rag_context = "\n".join(retrieved_chunks) if retrieved_chunks else "No relevant context retrieved."
+                
+                if "No relevant context retrieved" in rag_context:
+                    continue
+                else:
+                    combined_output += f"\n RAG Context that might help you: \n{rag_context}"
+                
             full_convo.append({
                 "role": "user",
                 "content": combined_output.strip() or "No output from this command."
