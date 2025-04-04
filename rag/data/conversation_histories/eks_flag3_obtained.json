@@ -102,7 +102,7 @@
       },
       {
         "role": "user",
-        "content": "Command: crane blob 688655246681.dkr.ecr.us-west-1.amazonaws.com/central_repo-aaf4a7c@sha256:575a75bed1bdcf83fba40e82c30a7eec7bc758645830332a38cef238cd4cf0f3 | jq .history\nOutput:\n[\n  ...,\n  {\n    \"created\": \"2023-11-01T13:32:07.782534085Z\",\n    \"created_by\": \"RUN sh -c #ARTIFACTORY_USERNAME=challenge@eksclustergames.com ARTIFACTORY_TOKEN=wiz_eks_challenge{the_history_of_container_images_could_reveal_the_secrets_to_the_future} ARTIFACTORY_REPO=base_repo /bin/sh -c pip install setuptools --index-url intrepo.eksclustergames.com # buildkit # buildkit\",\n    \"comment\": \"buildkit.dockerfile.v0\"\n  },\n  ...\n]"
+        "content": "Command: crane blob 688655246681.dkr.ecr.us-west-1.amazonaws.com/central_repo-aaf4a7c@sha256:575a75bed1bdcf83fba40e82c30a7eec7bc758645830332a38cef238cd4cf0f3 | jq .history\nOutput:\n[\n  ...,\n  {\n    \"created\": \"2023-11-01T13:32:07.782534085Z\",\n    \"created_by\": \"RUN sh -c #ARTIFACTORY_USERNAME=challenge@eksclustergames.com ARTIFACTORY_TOKEN=wiz_eks_challenge{...} ARTIFACTORY_REPO=base_repo /bin/sh -c pip install setuptools --index-url intrepo.eksclustergames.com # buildkit # buildkit\",\n    \"comment\": \"buildkit.dockerfile.v0\"\n  },\n  ...\n]"
       },
       {
         "role": "assistant",

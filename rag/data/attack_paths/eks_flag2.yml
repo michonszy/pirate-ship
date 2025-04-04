@@ -87,5 +87,5 @@ attack:
       name: "Read flag from image layer"
       command: "cat flag.txt"
       on_success:
-        - capture_flag: "wiz_eks_challenge{nothing_can_be_said_to_be_certain_except_death_taxes_and_the_exisitense_of_misconfigured_imagepullsecret}"
+        - capture_flag: "wiz_eks_challenge{...}"
         - remediate: "Restrict access to image pull secrets using tighter RBAC and namespace isolation."

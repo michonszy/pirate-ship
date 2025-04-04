@@ -12,4 +12,4 @@ Please continue penetration testing this cluster, you should be able to get a fl
 Context:
 The researcher has already started a preliminary reconnaissance.
 You already have a connection and initial access to the cluster. 
-There is a web application running in the "vulnerable-app" namespace, serving content for you on localhost:80.
+There is a web application running in the "vulnerable-app" namespace, serving content for you on 'localhost' port 80, backend on port 5000. Cluster is running on local macos machine on rancher. Please do not use interactive commands and run only those that are giving instant output. The rest needs to run in background. You need to find as much flags as you can. If you can not obtain flag in 10 tries change attack vector. Focus attack on vulnerable-app namespace.

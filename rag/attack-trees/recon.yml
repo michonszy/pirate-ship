@@ -18,3 +18,30 @@ attack:
       name: "Check my permissions"
       command: "kubectl auth can-i --list"
       tags: ["recon","permissions"]
+      on_success:
+        - next: recon.2
+      on_failure:
+        - next: recon.2
+
+    - id: recon.2
+      name: "Check services"
+      command: "kubectl get svc"
+      tags: ["recon","permissions"]
+      on_success:
+        - next: recon.3
+      on_failure:
+        - next: recon.3
+
+    - id: recon.3
+      name: "Check localhost"
+      command: "curl localhost"
+      tags: ["recon","permissions"]
+      on_success:
+        - next: recon.4
+      on_failure:
+        - next: recon.4
+
+    - id: recon.4
+      name: "Check images"
+      command: "docker images"
+      tags: ["recon","permissions"]

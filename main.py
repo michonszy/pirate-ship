@@ -7,6 +7,7 @@ import sys
 from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
+import json
 
 load_dotenv()
 TOOL_NAMES = ["trivy"]
@@ -203,6 +204,31 @@ def execute_attack_tree(attack_tree):
             print("No flags were captured during execution.")
 
 
+def convert_raw_to_json(raw_text):
+    """
+    Converts a raw penetration test chat (with [SYSTEM], [USER], [ASSISTANT] blocks)
+    into a structured JSON with a 'system' message and a 'conversation' list.
+    """
+    pattern = re.compile(r"\[(SYSTEM|USER|ASSISTANT)\]\s*")
+    parts = pattern.split(raw_text)[1:]
+
+    result = {
+        "system": "",
+        "conversation": []
+    }
+    for i in range(0, len(parts), 2):
+        role = parts[i].strip().lower()
+        content = parts[i+1].strip()
+        if role == "system":
+            result["system"] = content
+        else:
+            result["conversation"].append({
+                "role": role,
+                "content": content
+            })
+
+    return result
+
 def hack(hack_name):
     """
     Everything setted up? Let's execute this!
@@ -302,6 +328,7 @@ def status():
         print("  • Check if VPN or local cluster (e.g., Rancher Desktop) is running.")
         print("  • Run: kubectl config get-contexts")
         print("  • Use: kubectl config use-context <context-name>\n")
+        print("If you can not run this tool directly on the cluster you can still try interactive_ai mode")
         return True
 
 def read_large_input():
@@ -457,7 +484,7 @@ def auto_hack():
 
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    for i in range(20):
+    for i in range(100):
         print(f"\n--- Iteration {i + 1} ---")
         try:
             response = client.chat.completions.create(
@@ -498,7 +525,28 @@ def auto_hack():
                     err = e.stderr.strip()
                     print(f"❌ Failed:\n{err}")
                     combined_output += f"\nCommand: {line}\nError:\n{err}\n"
+                # RAG setup
+                chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+                tools_mentioned = [tool for tool in TOOL_NAMES if tool.lower() in combined_output.lower()]
+                collections_to_query = ["attack_paths", "conversation_histories"]
+                if tools_mentioned:
+                    collections_to_query.append("tools_documentation")
+                    
+                retrieved_chunks = []
+                for name in collections_to_query:
+                    collection = chroma_client.get_or_create_collection(name=name)
+                    results = collection.query(query_texts=[combined_output], n_results=NUM_RESULTS)
+                    docs = results.get("documents", [[]])[0] if results.get("documents") else []
+                    if docs:
+                        retrieved_chunks.append(f"\n## From {name}:\n" + "\n".join(f"[{i+1}] {doc.strip()}" for i, doc in enumerate(docs)))
 
+                rag_context = "\n".join(retrieved_chunks) if retrieved_chunks else "No relevant context retrieved."
+                
+                if "No relevant context retrieved" in rag_context:
+                    continue
+                else:
+                    combined_output += f"\n RAG Context that might help you: \n{rag_context}"
+                    
             full_convo.append({
                 "role": "user",
                 "content": combined_output.strip() or "No output from this command."
